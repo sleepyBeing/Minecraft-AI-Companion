@@ -13,4 +13,5 @@ server/whitelist.json
 
 # Local bot dependencies and configuration
 bot/node_modules/
+bot/dist/
 bot/.env
