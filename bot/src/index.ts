@@ -55,7 +55,7 @@ bot.on("end", (reason) => {
   console.log("Bot disconnected:", reason);
 });
 
-// mc chat connection
+// chat connection
 bot.on("chat", (username, message) => {
   if (username === bot.username) {
     return;
@@ -67,4 +67,29 @@ bot.on("chat", (username, message) => {
     bot.chat(`Hello, ${username}.`);
   }
   
+  // movement command testing
+  if (message.toLowerCase() === "!companion forward") {
+    bot.setControlState("forward", true);
+
+    setTimeout(() => {
+        bot.setControlState("forward", false);
+    }, 100);   
+
+    return;
+  }
+
+  if (message.toLowerCase() === "!companion jump") {
+    bot.setControlState("jump", true);
+
+    setTimeout(() => {
+        bot.setControlState("jump", false);
+    }, 1000);
+
+    return;
+  }
+
+  if (message.toLowerCase() === "!companion stop") {
+    bot.clearControlStates();
+    bot.chat("Bot has stopped");
+  } 
 });
