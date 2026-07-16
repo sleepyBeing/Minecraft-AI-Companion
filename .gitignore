@@ -1,0 +1,15 @@
+# Local Minecraft server runtime files
+server/libraries/
+server/versions/
+server/logs/
+server/world*/
+server/*.jar
+server/eula.txt
+server/server.properties
+
+# Server-specific player and administration data
+server/banned-ips.json
+server/banned-players.json
+server/ops.json
+server/usercache.json
+server/whitelist.json
