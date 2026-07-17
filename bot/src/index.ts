@@ -65,6 +65,16 @@ bot.on("chat", async (username, message) => {
 
   console.log(`<${username}> ${message}`);
 
+  if (message.toLowerCase() === "!companion status") {
+    const inventory = bot.inventory.items();
+    const inventorySummary = inventory.length === 0
+      ? "empty"
+      : inventory.map((item) => `${item.count} ${item.name}`).join(", ");
+
+    bot.chat(`Health: ${bot.health}/20 | Inventory: ${inventorySummary}`);
+    return;
+  }
+
   if (message.toLowerCase() === "!companion hello") {
     bot.chat(`Hello, ${username}.`);
   }
