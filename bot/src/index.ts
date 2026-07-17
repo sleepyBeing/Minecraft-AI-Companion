@@ -2,6 +2,7 @@ import "dotenv/config";
 import mineflayer from "mineflayer";
 import type { Entity } from "prismarine-entity";
 import { Vec3 } from "vec3";
+import { startFollowingNearestPlayer } from "./followPlayer.js";
 
 function getRequiredEnvironmentVariable(name: string): string {
   const value = process.env[name];
@@ -43,6 +44,7 @@ bot.once("spawn", () => {
   console.log(`Position: x=${x.toFixed(1)}, y=${y.toFixed(1)}, z=${z.toFixed(1)}`);
 
   bot.chat("CompanionBot is online.");
+  startFollowingNearestPlayer(bot);
 });
 
 bot.on("kicked", (reason) => {
