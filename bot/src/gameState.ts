@@ -77,9 +77,7 @@ export interface Position { x: number; y: number; z: number }
 export interface ItemStack { name: string; count: number; slot: number | null }
 
 export interface GameStateOptions {
-  /** Maximum distance to inspect. Keep this modest when sampling every game tick. */
   radius?: number;
-  /** Maximum number of blocks returned in each category. */
   maxBlocks?: number;
 }
 
@@ -142,8 +140,6 @@ function entityState(entity: Entity, bot: Bot): NearbyEntity {
   return {
     id: entity.id, name: entity.name ?? entity.type, kind: classifyEntity(entity), position: toPosition(entity.position),
     velocity: toPosition(entity.velocity), distance: bot.entity.position.distanceTo(entity.position), health: entity.health ?? null,
-    // Mineflayer does not expose an aggro target for every mob; callers can infer
-    // threat from hostile kind, distance, and velocity until a combat plugin adds it.
     isTargetingBot: false
   };
 }
