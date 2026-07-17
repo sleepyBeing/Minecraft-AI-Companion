@@ -1,50 +1,55 @@
 import type { Bot } from "mineflayer";
+import { goals, Movements } from "mineflayer-pathfinder";
 
-const START_FOLLOWING_DISTANCE = 5;
-const STOP_FOLLOWING_DISTANCE = 4;
-const FOLLOW_INTERVAL_MS = 250;
+const FOLLOW_DISTANCE = 4;
+const RETARGET_INTERVAL_MS = 1_000;
 
 /**
- * Keeps the bot near the closest visible player
- * Distances create a 3–5 block comfort zone without movement jitter
-
+ * Pathfinding to keep the bot within 3-5 blocks of the closest visible player
+ * Handles one block step ups, and keeps calculating new routes as the player moves
  */
-
 export function startFollowingNearestPlayer(bot: Bot): () => void {
-  let movingToPlayer = false;
-  let looking = false;
+  const movements = new Movements(bot);
+  movements.canDig = false;
+  movements.allow1by1towers = false;
+  movements.allowParkour = false;
+  movements.maxDropDown = 2;
+  movements.infiniteLiquidDropdownDistance = false;
 
+  for (const blockName of [
+    "lava", "fire", "soul_fire", "cactus", "sweet_berry_bush", "powder_snow",
+    "magma_block", "campfire", "soul_campfire", "wither_rose"
+  ]) {
+    const block = bot.registry.blocksByName[blockName];
+    if (block) movements.blocksToAvoid.add(block.id);
+  }
+
+  for (const entityName of ["creeper", "warden", "wither", "end_crystal"])
+    movements.entitiesToAvoid.add(entityName);
+
+  bot.pathfinder.setMovements(movements);
+
+  let followedPlayerId: number | null = null;
   const interval = setInterval(() => {
     const player = bot.nearestEntity((entity) =>
       entity.type === "player" && entity.username !== bot.username
     );
 
     if (!player) {
-      if (movingToPlayer) bot.setControlState("forward", false);
-      movingToPlayer = false;
+      if (followedPlayerId !== null) bot.pathfinder.setGoal(null);
+      followedPlayerId = null;
       return;
     }
 
-    const distance = bot.entity.position.distanceTo(player.position);
-
-    if (distance > START_FOLLOWING_DISTANCE) {
-      movingToPlayer = true;
-    } else if (distance <= STOP_FOLLOWING_DISTANCE) {
-      movingToPlayer = false;
+    // Bot routes around obstacles and returns to player when separated
+    if (followedPlayerId !== player.id) {
+      bot.pathfinder.setGoal(new goals.GoalFollow(player, FOLLOW_DISTANCE), true);
+      followedPlayerId = player.id;
     }
-
-    bot.setControlState("forward", movingToPlayer);
-
-    if (movingToPlayer && !looking) {
-      looking = true;
-      void bot.lookAt(player.position.offset(0, player.height * 0.8, 0), true)
-        .catch((error: unknown) => console.error("Could not look at player while following:", error))
-        .finally(() => { looking = false; });
-    }
-  }, FOLLOW_INTERVAL_MS);
+  }, RETARGET_INTERVAL_MS);
 
   return () => {
     clearInterval(interval);
-    bot.setControlState("forward", false);
+    bot.pathfinder.setGoal(null);
   };
 }

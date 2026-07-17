@@ -2,6 +2,7 @@ import "dotenv/config";
 import mineflayer from "mineflayer";
 import type { Entity } from "prismarine-entity";
 import { Vec3 } from "vec3";
+import { pathfinder } from "mineflayer-pathfinder";
 import { startFollowingNearestPlayer } from "./followPlayer.js";
 
 function getRequiredEnvironmentVariable(name: string): string {
@@ -32,6 +33,8 @@ const bot = mineflayer.createBot({
   version,
   auth: "offline"
 });
+
+bot.loadPlugin(pathfinder);
 
 bot.on("login", () => {
   console.log(`Logged in as ${bot.username}.`);
