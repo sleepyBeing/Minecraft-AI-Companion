@@ -4,6 +4,7 @@ import type { Entity } from "prismarine-entity";
 import { Vec3 } from "vec3";
 import { pathfinder } from "mineflayer-pathfinder";
 import { startFollowingNearestPlayer } from "./followPlayer.js";
+import { GatheringController } from "./gathering.js";
 
 function getRequiredEnvironmentVariable(name: string): string {
   const value = process.env[name];
@@ -35,6 +36,7 @@ const bot = mineflayer.createBot({
 });
 
 bot.loadPlugin(pathfinder);
+const gathering = new GatheringController(bot);
 
 bot.on("login", () => {
   console.log(`Logged in as ${bot.username}.`);
@@ -47,7 +49,7 @@ bot.once("spawn", () => {
   console.log(`Position: x=${x.toFixed(1)}, y=${y.toFixed(1)}, z=${z.toFixed(1)}`);
 
   bot.chat("CompanionBot is online.");
-  startFollowingNearestPlayer(bot);
+  startFollowingNearestPlayer(bot, { isBusy: () => gathering.isBusy });
 });
 
 bot.on("kicked", (reason) => {
@@ -69,6 +71,8 @@ bot.on("chat", async (username, message) => {
   }
 
   console.log(`<${username}> ${message}`);
+
+  if (await gathering.handleCommand(username, message)) return;
 
   if (message.toLowerCase() === "!companion status") {
     const inventory = bot.inventory.items();

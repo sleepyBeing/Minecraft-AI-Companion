@@ -42,6 +42,7 @@ export function startFollowingNearestPlayer(bot: Bot, options: FollowOptions = {
   let progressAnchor = bot.entity.position.clone();
   let bestDistance = Number.POSITIVE_INFINITY;
   let teleportCooldownUntil = 0;
+  let pausedForBusy = false;
 
   const onPathUpdate = (result: { status: string; path: unknown[] }) => {
     if ((result.status === "success" || result.status === "partial") && result.path.length > 0)
@@ -59,6 +60,13 @@ export function startFollowingNearestPlayer(bot: Bot, options: FollowOptions = {
   const interval = setInterval(() => {
     const now = Date.now();
     const busy = options.isBusy?.() ?? false;
+
+    // Another controller owns pathfinder while busy. Do not cancel or replace
+    // its goal; resume following after it releases control.
+    if (busy) {
+      pausedForBusy = true;
+      return;
+    }
 
     if (!followedUsername) {
       const nearest = nearestPlayer(bot);
@@ -82,6 +90,15 @@ export function startFollowingNearestPlayer(bot: Bot, options: FollowOptions = {
       return;
     }
 
+    if (pausedForBusy) {
+      pausedForBusy = false;
+      recoveryActive = false;
+      pathfinder.searchRadius = NORMAL_SEARCH_RADIUS;
+      pathfinder.setMovements(normalMovements);
+      resetProgress(player);
+      setFollowGoal(player);
+    }
+
     const distance = bot.entity.position.distanceTo(player.position);
     lastKnownDistance = distance;
 
@@ -98,7 +115,6 @@ export function startFollowingNearestPlayer(bot: Bot, options: FollowOptions = {
       if (recoveryActive) restoreNormalFollowing(player);
       return;
     }
-    if (busy) return;
 
     const noProgressFor = now - lastProgressAt;
     if (!recoveryActive && noProgressFor >= RECOVERY_AFTER_MS) {
