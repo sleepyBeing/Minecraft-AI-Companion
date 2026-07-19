@@ -23,12 +23,13 @@ interface GatherTask {
   id: number;
   requester: string;
   quantity: number;
+  remainingToDeliver: number;
   spec: MaterialSpec;
-  startingCount: number;
   unreachable: Set<string>;
   explorationStep: number;
   stripDirection: number;
   stripSteps: number;
+  awaitingDeliveryNotified: boolean;
 }
 
 const MATERIALS: Record<string, MaterialSpec> = {
@@ -124,8 +125,9 @@ export class GatheringController {
     this.stop();
     const task: GatherTask = {
       id: this.nextTaskId++, requester, quantity, spec,
-      startingCount: inventoryCount(this.bot, spec.itemNames),
-      unreachable: new Set(), explorationStep: 0, stripDirection: 0, stripSteps: 0
+      remainingToDeliver: quantity,
+      unreachable: new Set(), explorationStep: 0, stripDirection: 0, stripSteps: 0,
+      awaitingDeliveryNotified: false
     };
     this.task = task;
     this.bot.chat(`Gathering ${quantity} ${spec.displayName} for ${requester}.`);
@@ -145,17 +147,32 @@ export class GatheringController {
 
     try {
       while (this.isCurrent(task)) {
-        const gathered = inventoryCount(this.bot, task.spec.itemNames) - task.startingCount;
-        if (gathered >= task.quantity) {
-          const delivered = await this.deliverGatheredItems(task, gathered);
+        const available = inventoryCount(this.bot, task.spec.itemNames);
+
+        // Existing inventory counts toward the request. If the player dies,
+        // keep the finished order and retry delivery after they respawn.
+        if (available >= task.remainingToDeliver) {
+          const delivered = await this.deliverGatheredItems(task, task.remainingToDeliver);
           if (!this.isCurrent(task)) return;
-          this.task = null;
-          this.bot.pathfinder.stop();
-          if (delivered > 0)
-            this.bot.chat(`Finished gathering and gave ${delivered} ${task.spec.displayName} to ${task.requester}.`);
-          else
-            this.bot.chat(`Finished gathering ${gathered} ${task.spec.displayName}, but I could not reach ${task.requester} to deliver them.`);
-          return;
+
+          if (delivered > 0) {
+            task.remainingToDeliver -= delivered;
+            task.awaitingDeliveryNotified = false;
+          }
+
+          if (task.remainingToDeliver <= 0) {
+            this.task = null;
+            this.bot.pathfinder.stop();
+            this.bot.chat(`Delivered ${task.quantity} ${task.spec.displayName} to ${task.requester}.`);
+            return;
+          }
+
+          if (!task.awaitingDeliveryNotified) {
+            this.bot.chat(`I have the ${task.spec.displayName}; I will deliver them when ${task.requester} is reachable.`);
+            task.awaitingDeliveryNotified = true;
+          }
+          await sleep(1_000);
+          continue;
         }
 
         const toolProblem = requiredToolMessage(this.bot, task.spec);
@@ -242,6 +259,7 @@ export class GatheringController {
     }
   }
 
+  /** Walk to the requester and toss only the outstanding requested quantity. */
   private async deliverGatheredItems(task: GatherTask, amount: number): Promise<number> {
     const player = this.bot.players[task.requester]?.entity;
     if (!player) return 0;
