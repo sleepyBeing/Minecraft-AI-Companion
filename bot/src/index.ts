@@ -37,6 +37,8 @@ const bot = mineflayer.createBot({
 
 bot.loadPlugin(pathfinder);
 const gathering = new GatheringController(bot);
+let companionPlayerUsername: string | null = null;
+let teleportAfterRespawn = false;
 
 bot.on("login", () => {
   console.log(`Logged in as ${bot.username}.`);
@@ -50,6 +52,31 @@ bot.once("spawn", () => {
 
   bot.chat("CompanionBot is online.");
   startFollowingNearestPlayer(bot, { isBusy: () => gathering.isBusy });
+});
+
+bot.on("playerJoined", (player) => {
+  if (!companionPlayerUsername && player.username !== bot.username)
+    companionPlayerUsername = player.username;
+});
+
+bot.on("death", () => {
+  const nearbyPlayer = bot.nearestEntity((entity) =>
+    entity.type === "player" && entity.username !== bot.username
+  );
+  companionPlayerUsername ??= nearbyPlayer?.username ?? null;
+  teleportAfterRespawn = companionPlayerUsername !== null;
+});
+
+bot.on("spawn", () => {
+  if (!teleportAfterRespawn || !companionPlayerUsername) return;
+  const target = companionPlayerUsername;
+  teleportAfterRespawn = false;
+
+  // Give the server a moment to finish the respawn before issuing the command.
+  setTimeout(() => {
+    if (!/^[A-Za-z0-9_]{1,16}$/.test(target)) return;
+    bot.chat(`/tp @s ${target}`);
+  }, 500);
 });
 
 bot.on("kicked", (reason) => {
@@ -69,6 +96,8 @@ bot.on("chat", async (username, message) => {
   if (username === bot.username) {
     return;
   }
+
+  companionPlayerUsername = username;
 
   console.log(`<${username}> ${message}`);
 
