@@ -18,7 +18,6 @@ const DANGEROUS_BLOCKS = [
 ];
 
 export interface FollowOptions {
-  /** future condition for combat and gathering */
   isBusy?: () => boolean;
 }
 
@@ -61,8 +60,6 @@ export function startFollowingNearestPlayer(bot: Bot, options: FollowOptions = {
     const now = Date.now();
     const busy = options.isBusy?.() ?? false;
 
-    // Another controller owns pathfinder while busy. Do not cancel or replace
-    // its goal; resume following after it releases control.
     if (busy) {
       pausedForBusy = true;
       return;

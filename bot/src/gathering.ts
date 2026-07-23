@@ -82,11 +82,28 @@ const MATERIALS: Record<string, MaterialSpec> = {
 export class GatheringController {
   private task: GatherTask | null = null;
   private nextTaskId = 1;
+  private paused = false;
+  private restoreMovements = false;
 
   constructor(private readonly bot: Bot) {}
 
   get isBusy(): boolean {
     return this.task !== null;
+  }
+
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  setPaused(paused: boolean): void {
+    if (this.paused === paused) return;
+    this.paused = paused;
+    if (paused) {
+      this.bot.pathfinder.setGoal(null);
+      this.bot.stopDigging();
+    } else {
+      this.restoreMovements = true;
+    }
   }
 
   async handleCommand(requester: string, message: string): Promise<boolean> {
@@ -138,6 +155,8 @@ export class GatheringController {
   stop(notification?: string): void {
     if (!this.task) return;
     this.task = null;
+    this.paused = false;
+    this.restoreMovements = false;
     this.bot.pathfinder.stop();
     if (notification) this.bot.chat(notification);
   }
@@ -147,6 +166,15 @@ export class GatheringController {
 
     try {
       while (this.isCurrent(task)) {
+        if (this.paused) {
+          await sleep(250);
+          continue;
+        }
+        if (this.restoreMovements) {
+          this.bot.pathfinder.setMovements(createGatherMovements(this.bot, false));
+          this.restoreMovements = false;
+        }
+
         const available = inventoryCount(this.bot, task.spec.itemNames);
 
         // Existing inventory counts toward the request. If the player dies,
@@ -194,6 +222,10 @@ export class GatheringController {
       }
     } catch (error) {
       if (!this.isCurrent(task)) return;
+      if (this.paused) {
+        void this.run(task);
+        return;
+      }
       console.error("Gathering failed:", error);
       this.bot.chat(`I couldn't continue gathering ${task.spec.displayName}.`);
       this.task = null;

@@ -5,6 +5,7 @@ import { Vec3 } from "vec3";
 import { pathfinder } from "mineflayer-pathfinder";
 import { startFollowingNearestPlayer } from "./followPlayer.js";
 import { GatheringController } from "./gathering.js";
+import { RuleBasedCombatController } from "./combat.js";
 
 function getRequiredEnvironmentVariable(name: string): string {
   const value = process.env[name];
@@ -39,6 +40,11 @@ bot.loadPlugin(pathfinder);
 const gathering = new GatheringController(bot);
 let companionPlayerUsername: string | null = null;
 let teleportAfterRespawn = false;
+const combat = new RuleBasedCombatController(bot, {
+  getProtectedPlayerUsername: () => companionPlayerUsername,
+  onCombatStart: () => gathering.setPaused(true),
+  onCombatEnd: () => gathering.setPaused(false)
+});
 
 bot.on("login", () => {
   console.log(`Logged in as ${bot.username}.`);
@@ -51,7 +57,8 @@ bot.once("spawn", () => {
   console.log(`Position: x=${x.toFixed(1)}, y=${y.toFixed(1)}, z=${z.toFixed(1)}`);
 
   bot.chat("CompanionBot is online.");
-  startFollowingNearestPlayer(bot, { isBusy: () => gathering.isBusy });
+  combat.start();
+  startFollowingNearestPlayer(bot, { isBusy: () => gathering.isBusy || combat.isBusy });
 });
 
 bot.on("playerJoined", (player) => {
