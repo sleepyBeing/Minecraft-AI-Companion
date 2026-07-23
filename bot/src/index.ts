@@ -6,6 +6,7 @@ import { pathfinder } from "mineflayer-pathfinder";
 import { startFollowingNearestPlayer } from "./followPlayer.js";
 import { GatheringController, selectBestMiningTool } from "./gathering.js";
 import { RuleBasedCombatController } from "./combat.js";
+import { DeathRecoveryController } from "./deathRecovery.js";
 
 function getRequiredEnvironmentVariable(name: string): string {
   const value = process.env[name];
@@ -39,12 +40,28 @@ const bot = mineflayer.createBot({
 bot.loadPlugin(pathfinder);
 const gathering = new GatheringController(bot);
 let companionPlayerUsername: string | null = null;
-let teleportAfterRespawn = false;
 let stopFollowing: (() => void) | null = null;
-const combat = new RuleBasedCombatController(bot, {
+let combat: RuleBasedCombatController;
+const deathRecovery = new DeathRecoveryController(bot, {
+  onStart: () => gathering.setPaused(true),
+  onEnd: () => {
+    if (!combat.isBusy) gathering.setPaused(false);
+  },
+  returnToPlayer: () => {
+    const target = companionPlayerUsername;
+    if (!target || !/^[A-Za-z0-9_]{1,16}$/.test(target)) return;
+
+    // The bot is an operator on this experimental server. Returning via the
+    // server command keeps recovery from starting another expensive long path.
+    bot.chat(`/tp @s ${target}`);
+  }
+});
+combat = new RuleBasedCombatController(bot, {
   getProtectedPlayerUsername: () => companionPlayerUsername,
   onCombatStart: () => gathering.setPaused(true),
-  onCombatEnd: () => gathering.setPaused(false)
+  onCombatEnd: () => {
+    if (!deathRecovery.isBusy) gathering.setPaused(false);
+  }
 });
 
 bot.on("login", () => {
@@ -61,7 +78,9 @@ bot.once("spawn", () => {
 
   bot.chat("CompanionBot is online.");
   combat.start();
-  stopFollowing = startFollowingNearestPlayer(bot, { isBusy: () => gathering.isBusy || combat.isBusy });
+  stopFollowing = startFollowingNearestPlayer(bot, {
+    isBusy: () => gathering.isBusy || combat.isBusy || deathRecovery.isBusy
+  });
 });
 
 bot.on("playerJoined", (player) => {
@@ -74,19 +93,11 @@ bot.on("death", () => {
     entity.type === "player" && entity.username !== bot.username
   );
   companionPlayerUsername ??= nearbyPlayer?.username ?? null;
-  teleportAfterRespawn = companionPlayerUsername !== null;
+  deathRecovery.recordDeath();
 });
 
 bot.on("spawn", () => {
-  if (!teleportAfterRespawn || !companionPlayerUsername) return;
-  const target = companionPlayerUsername;
-  teleportAfterRespawn = false;
-
-  // Give the server a moment to finish the respawn before issuing the command.
-  setTimeout(() => {
-    if (!/^[A-Za-z0-9_]{1,16}$/.test(target)) return;
-    bot.chat(`/tp @s ${target}`);
-  }, 500);
+  deathRecovery.startAfterRespawn();
 });
 
 bot.on("kicked", (reason) => {
@@ -100,6 +111,7 @@ bot.on("error", (error) => {
 bot.on("end", (reason) => {
   gathering.stop();
   combat.stop();
+  deathRecovery.stop();
   stopFollowing?.();
   stopFollowing = null;
   console.log("Bot disconnected:", reason);
