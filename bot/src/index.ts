@@ -97,7 +97,18 @@ bot.on("death", () => {
 });
 
 bot.on("spawn", () => {
-  deathRecovery.startAfterRespawn();
+  if (!deathRecovery.isBusy) return;
+
+  const target = companionPlayerUsername;
+  if (target && /^[A-Za-z0-9_]{1,16}$/.test(target)) {
+    // Respawn beside the protected player first. In the common case where the
+    // player stayed by the death site, this places the bot beside its drops and
+    // avoids an unnecessary long path from the world spawn.
+    bot.chat(`/tp @s ${target}`);
+  }
+
+  // Allow the respawn and optional teleport to finish before starting recovery.
+  setTimeout(() => deathRecovery.startAfterRespawn(), 750);
 });
 
 bot.on("kicked", (reason) => {

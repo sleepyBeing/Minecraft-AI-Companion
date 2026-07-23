@@ -102,6 +102,8 @@ export class DeathRecoveryController {
   }
 
   private async navigateInSegments(target: Vec3, deadline: number): Promise<boolean> {
+    if (this.bot.entity.position.distanceTo(target) <= 6) return true;
+
     while (Date.now() < deadline) {
       const current = this.bot.entity.position;
       const dx = target.x - current.x;
