@@ -265,7 +265,7 @@ export class GatheringController {
       const currentBlock = this.bot.blockAt(block.position);
       if (!currentBlock || !task.spec.blockNames.includes(currentBlock.name)) return;
 
-      const tool = bestHarvestTool(this.bot, currentBlock);
+      const tool = selectBestMiningTool(this.bot, currentBlock);
       if (currentBlock.harvestTools && !tool) {
         throw new Error(`No adequate tool remains for ${currentBlock.name}`);
       }
@@ -425,7 +425,7 @@ export class GatheringController {
       return false;
     }
 
-    const tool = bestHarvestTool(this.bot, block);
+    const tool = selectBestMiningTool(this.bot, block);
     if (block.harvestTools && !tool) {
       this.bot.chat(`I need a better tool to mine ${block.name}.`);
       this.stop();
@@ -490,9 +490,26 @@ function requiredToolMessage(bot: Bot, spec: MaterialSpec): string | null {
   return examples ? `I need an adequate tool such as ${examples}` : "I don't have an adequate tool";
 }
 
-function bestHarvestTool(bot: Bot, block: Block): Item | null {
-  const valid = bot.inventory.items().filter((item) => block.canHarvest(item.type));
+export function selectBestMiningTool(bot: Bot, block: Block): Item | null {
+  const preferredTool = preferredToolFor(block.material);
+  const valid = bot.inventory.items().filter((item) => {
+    if (preferredTool && !item.name.endsWith(`_${preferredTool}`)) return false;
+    return !block.harvestTools || block.canHarvest(item.type);
+  });
+
+  // Hand-harvestable blocks should use an empty hand when the appropriate tool
+  // is unavailable, rather than consuming sword durability for a small speedup.
+  if (valid.length === 0) return null;
   return valid.sort((a, b) => block.digTime(a.type, false, false, false) - block.digTime(b.type, false, false, false))[0] ?? null;
+}
+
+function preferredToolFor(material: string | null | undefined): "axe" | "pickaxe" | "shovel" | "hoe" | null {
+  if (!material) return null;
+  if (material.includes("mineable/axe")) return "axe";
+  if (material.includes("mineable/pickaxe")) return "pickaxe";
+  if (material.includes("mineable/shovel")) return "shovel";
+  if (material.includes("mineable/hoe")) return "hoe";
+  return null;
 }
 
 function createGatherMovements(bot: Bot, canMine: boolean, allowWater = false): Movements {

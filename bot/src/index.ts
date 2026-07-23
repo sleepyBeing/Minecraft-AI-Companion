@@ -4,7 +4,7 @@ import type { Entity } from "prismarine-entity";
 import { Vec3 } from "vec3";
 import { pathfinder } from "mineflayer-pathfinder";
 import { startFollowingNearestPlayer } from "./followPlayer.js";
-import { GatheringController } from "./gathering.js";
+import { GatheringController, selectBestMiningTool } from "./gathering.js";
 import { RuleBasedCombatController } from "./combat.js";
 
 function getRequiredEnvironmentVariable(name: string): string {
@@ -37,6 +37,7 @@ const bot = mineflayer.createBot({
 });
 
 bot.loadPlugin(pathfinder);
+bot.pathfinder.bestHarvestTool = (block) => selectBestMiningTool(bot, block);
 const gathering = new GatheringController(bot);
 let companionPlayerUsername: string | null = null;
 let teleportAfterRespawn = false;
