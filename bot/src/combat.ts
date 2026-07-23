@@ -1,4 +1,4 @@
-import type { Bot } from "mineflayer";
+import type { Bot, EquipmentDestination } from "mineflayer";
 import { goals, Movements } from "mineflayer-pathfinder";
 import type { Entity } from "prismarine-entity";
 import type { Item } from "prismarine-item";
@@ -49,6 +49,8 @@ export class RuleBasedCombatController {
   private retreatAnchor: Vec3 | null = null;
   private retreatStartedAt = 0;
   private lastRetreatGoalAt = 0;
+  private lastArmorCheckAt = 0;
+  private equippingArmor = false;
 
   constructor(private readonly bot: Bot, private readonly options: CombatOptions) {}
 
@@ -57,6 +59,7 @@ export class RuleBasedCombatController {
 
   start(): void {
     if (this.timer) return;
+    void this.equipBestArmor(true);
     this.timer = setInterval(() => void this.tickSafely(), 200);
   }
 
@@ -82,6 +85,7 @@ export class RuleBasedCombatController {
     if (target) {
       this.lastThreatAt = now;
       this.enterCombat();
+      await this.equipBestArmor();
       const distance = this.bot.entity.position.distanceTo(target.position);
 
       if (this.bot.health <= RETREAT_HEALTH || (target.name === "creeper" && distance <= 5)) {
@@ -119,7 +123,7 @@ export class RuleBasedCombatController {
 
   private chooseThreat(player: Entity | null): Entity | null {
     const hostiles = Object.values(this.bot.entities).filter((entity) =>
-      entity.type === "mob" && HOSTILES.has(entity.name ?? "") &&
+      (entity.type === "hostile" || HOSTILES.has(entity.name ?? "")) &&
       this.bot.entity.position.distanceTo(entity.position) <= THREAT_RADIUS
     );
 
@@ -293,8 +297,37 @@ export class RuleBasedCombatController {
     const weapon = this.bot.inventory.items()
       .filter((item) => weaponScore(item.name) > 0)
       .sort((a, b) => weaponScore(b.name) - weaponScore(a.name))[0];
-    if (weapon) await this.bot.equip(weapon, "hand");
-    else await this.bot.unequip("hand");
+    if (weapon && this.bot.heldItem?.slot !== weapon.slot) await this.bot.equip(weapon, "hand");
+    else if (!weapon && this.bot.heldItem) await this.bot.unequip("hand");
+  }
+
+  private async equipBestArmor(force = false): Promise<void> {
+    const now = Date.now();
+    if (this.equippingArmor || (!force && now - this.lastArmorCheckAt < 5_000)) return;
+    this.equippingArmor = true;
+    this.lastArmorCheckAt = now;
+
+    try {
+      const destinations: EquipmentDestination[] = ["head", "torso", "legs", "feet"];
+      for (const destination of destinations) {
+        const candidates = this.bot.inventory.items()
+          .filter((item) => armorDestination(item.name) === destination && !hasBindingCurse(item))
+          .sort((a, b) => armorScore(b) - armorScore(a));
+        const best = candidates[0];
+        if (!best) continue;
+
+        const equippedSlot = this.bot.getEquipmentDestSlot(destination);
+        const equipped = this.bot.inventory.slots[equippedSlot];
+        if (equipped && hasBindingCurse(equipped)) continue;
+        if (equipped?.slot === best.slot || (equipped && armorScore(equipped) >= armorScore(best))) continue;
+
+        await this.bot.equip(best, destination);
+      }
+    } catch (error) {
+      console.error("Could not equip the best armor:", error);
+    } finally {
+      this.equippingArmor = false;
+    }
   }
 }
 
@@ -335,4 +368,37 @@ function foodScore(bot: Bot, item: Item, lowHealth: boolean): number {
   if (!food) return 0;
   const healingBonus = lowHealth && (item.name === "golden_apple" || item.name === "enchanted_golden_apple") ? 100 : 0;
   return healingBonus + food.foodPoints + food.saturation / 100;
+}
+
+function armorDestination(name: string): EquipmentDestination | null {
+  if (name.endsWith("_helmet") || name === "turtle_helmet") return "head";
+  if (name.endsWith("_chestplate")) return "torso";
+  if (name.endsWith("_leggings")) return "legs";
+  if (name.endsWith("_boots")) return "feet";
+  return null;
+}
+
+function armorScore(item: Item): number {
+  const name = item.name;
+  const material = name.startsWith("netherite_") ? 70 : name.startsWith("diamond_") ? 60 :
+    name.startsWith("iron_") ? 50 : name.startsWith("copper_") ? 45 :
+      name.startsWith("chainmail_") ? 40 : name.startsWith("golden_") ? 30 :
+        name.startsWith("leather_") ? 20 : name === "turtle_helmet" ? 52 : 0;
+  const durabilityRatio = item.maxDurability > 0
+    ? Math.max(0, (item.maxDurability - item.durabilityUsed) / item.maxDurability)
+    : 1;
+  const enchantment = item.enchants.reduce((score, enchant) => {
+    if (enchant.name === "protection") return score + enchant.lvl * 4;
+    if (["blast_protection", "projectile_protection", "fire_protection"].includes(enchant.name))
+      return score + enchant.lvl * 1.5;
+    if (enchant.name === "unbreaking") return score + enchant.lvl * 0.3;
+    if (enchant.name === "mending") return score + 0.5;
+    if (enchant.name === "thorns") return score + enchant.lvl * 0.5;
+    return score;
+  }, 0);
+  return material + durabilityRatio * 3 + enchantment;
+}
+
+function hasBindingCurse(item: Item): boolean {
+  return item.enchants.some((enchant) => enchant.name === "binding_curse" || enchant.name === "curse_of_binding");
 }

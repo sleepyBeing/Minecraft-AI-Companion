@@ -99,7 +99,12 @@ export function getGameState(bot: Bot, options: GameStateOptions = {}): GameStat
   const radius = options.radius ?? 16;
   const maxBlocks = options.maxBlocks ?? 32;
   const botPosition = bot.entity.position;
-  const blockPositions = bot.findBlocks({ matching: () => true, maxDistance: radius, count: maxBlocks * 8 });
+  const blockPositions = bot.findBlocks({
+    matching: (block) => !["air", "cave_air", "void_air"].includes(block.name),
+    maxDistance: radius,
+    count: maxBlocks * 8,
+    useExtraInfo: true
+  });
   const blocks = blockPositions
     .map((position) => bot.blockAt(position))
     .filter((block): block is NonNullable<typeof block> => block !== null);
@@ -149,9 +154,9 @@ function classifyEntity(entity: Entity): NearbyEntity["kind"] {
   if (entity.type === "player") return "player";
   if (name === "item") return "item";
   if (name.includes("arrow") || name.includes("projectile")) return "projectile";
-  if (HOSTILE_MOBS.has(name)) return "hostile";
+  if (entity.type === "hostile" || HOSTILE_MOBS.has(name)) return "hostile";
   if (NEUTRAL_MOBS.has(name)) return "neutral";
-  return entity.type === "mob" ? "passive" : "other";
+  return entity.type === "mob" || (entity.type as string) === "animal" ? "passive" : "other";
 }
 
 function findCliffs(bot: Bot, radius: number): Cliff[] {
