@@ -141,6 +141,8 @@ export function startFollowingNearestPlayer(bot: Bot, options: FollowOptions = {
   function restoreNormalFollowing(player: Entity): void {
     recoveryActive = false;
     pathfinder.searchRadius = NORMAL_SEARCH_RADIUS;
+    pathfinder.thinkTimeout = 10_000;
+    pathfinder.tickTimeout = 40;
     pathfinder.setMovements(normalMovements);
     setFollowGoal(player);
   }

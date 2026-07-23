@@ -6,6 +6,7 @@ import { Vec3 } from "vec3";
 
 const BLOCK_SEARCH_RADIUS = 48;
 const ITEM_COLLECTION_RADIUS = 8;
+type BoundedPathfinder = Bot["pathfinder"] & { searchRadius: number };
 const HAZARDS = [
   "water", "lava", "fire", "soul_fire", "cactus", "sweet_berry_bush", "powder_snow",
   "magma_block", "campfire", "soul_campfire", "wither_rose"
@@ -162,6 +163,7 @@ export class GatheringController {
   }
 
   private async run(task: GatherTask): Promise<void> {
+    this.configureGatherPathfinder();
     this.bot.pathfinder.setMovements(createGatherMovements(this.bot, false));
 
     try {
@@ -171,6 +173,7 @@ export class GatheringController {
           continue;
         }
         if (this.restoreMovements) {
+          this.configureGatherPathfinder();
           this.bot.pathfinder.setMovements(createGatherMovements(this.bot, false));
           this.restoreMovements = false;
         }
@@ -224,6 +227,10 @@ export class GatheringController {
         } else {
           await this.searchSurface(task);
         }
+
+        // Always yield between scans. Failed or immediately-satisfied path
+        // goals must not turn this loop into a CPU-bound retry spinner.
+        await sleep(150);
       }
     } catch (error) {
       if (!this.isCurrent(task)) return;
@@ -452,6 +459,13 @@ export class GatheringController {
 
   private isCurrent(task: GatherTask): boolean {
     return this.task?.id === task.id;
+  }
+
+  private configureGatherPathfinder(): void {
+    const pathfinder = this.bot.pathfinder as BoundedPathfinder;
+    pathfinder.searchRadius = 64;
+    pathfinder.thinkTimeout = 2_000;
+    pathfinder.tickTimeout = 20;
   }
 }
 

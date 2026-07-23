@@ -32,6 +32,8 @@ const MELEE_RANGE = 3.1;
 const RETREAT_HEALTH = 7;
 const SAFE_HEALTH = 13;
 const THREAT_CLEAR_MS = 5_000;
+const COMBAT_SEARCH_RADIUS = 32;
+type BoundedPathfinder = Bot["pathfinder"] & { searchRadius: number };
 
 /** Rule-based controller */
 export class RuleBasedCombatController {
@@ -173,6 +175,7 @@ export class RuleBasedCombatController {
     const changedTarget = this.targetId !== target.id;
     if (this.state !== "approach" || changedTarget) {
       this.setState("approach");
+      this.configureCombatPathfinder();
       this.bot.pathfinder.setMovements(createCombatMovements(this.bot));
       this.bot.pathfinder.setGoal(new goals.GoalFollow(target, 2.7), true);
     }
@@ -213,6 +216,7 @@ export class RuleBasedCombatController {
       const length = Math.max(0.001, Math.sqrt(away.x * away.x + away.z * away.z));
       const x = Math.floor(this.bot.entity.position.x + away.x / length * 10);
       const z = Math.floor(this.bot.entity.position.z + away.z / length * 10);
+      this.configureCombatPathfinder();
       this.bot.pathfinder.setMovements(createCombatMovements(this.bot));
       this.bot.pathfinder.setGoal(new goals.GoalNearXZ(x, z, 2));
       this.lastRetreatGoalAt = now;
@@ -299,6 +303,13 @@ export class RuleBasedCombatController {
       .sort((a, b) => weaponScore(b.name) - weaponScore(a.name))[0];
     if (weapon && this.bot.heldItem?.slot !== weapon.slot) await this.bot.equip(weapon, "hand");
     else if (!weapon && this.bot.heldItem) await this.bot.unequip("hand");
+  }
+
+  private configureCombatPathfinder(): void {
+    const pathfinder = this.bot.pathfinder as BoundedPathfinder;
+    pathfinder.searchRadius = COMBAT_SEARCH_RADIUS;
+    pathfinder.thinkTimeout = 1_000;
+    pathfinder.tickTimeout = 15;
   }
 
   private async equipBestArmor(force = false): Promise<void> {
