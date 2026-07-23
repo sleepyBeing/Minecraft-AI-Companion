@@ -7,7 +7,7 @@ import { Vec3 } from "vec3";
 const BLOCK_SEARCH_RADIUS = 48;
 const ITEM_COLLECTION_RADIUS = 8;
 const HAZARDS = [
-  "lava", "fire", "soul_fire", "cactus", "sweet_berry_bush", "powder_snow",
+  "water", "lava", "fire", "soul_fire", "cactus", "sweet_berry_bush", "powder_snow",
   "magma_block", "campfire", "soul_campfire", "wither_rose"
 ];
 
@@ -175,6 +175,11 @@ export class GatheringController {
           this.restoreMovements = false;
         }
 
+        if (isBotInWater(this.bot) || this.bot.oxygenLevel < 18) {
+          await this.escapeWater(task);
+          continue;
+        }
+
         const available = inventoryCount(this.bot, task.spec.itemNames);
 
         // Existing inventory counts toward the request. If the player dies,
@@ -239,7 +244,8 @@ export class GatheringController {
       .filter((id): id is number => id !== undefined);
 
     return this.bot.findBlock({
-      matching: (block) => ids.includes(block.type) && !task.unreachable.has(positionKey(block.position)),
+      matching: (block) => ids.includes(block.type) &&
+        !task.unreachable.has(positionKey(block.position)) && !this.isSubmerged(block),
       maxDistance: BLOCK_SEARCH_RADIUS,
       useExtraInfo: true
     });
@@ -249,6 +255,12 @@ export class GatheringController {
     try {
       await this.bot.pathfinder.goto(new goals.GoalLookAtBlock(block.position, this.bot.world, { reach: 4.5 }));
       if (!this.isCurrent(task)) return;
+
+      if (isBotInWater(this.bot) || this.bot.oxygenLevel < 18) {
+        task.unreachable.add(positionKey(block.position));
+        await this.escapeWater(task);
+        return;
+      }
 
       const currentBlock = this.bot.blockAt(block.position);
       if (!currentBlock || !task.spec.blockNames.includes(currentBlock.name)) return;
@@ -266,6 +278,42 @@ export class GatheringController {
       if (!this.isCurrent(task)) return;
       console.error(`Could not gather block at ${positionKey(block.position)}:`, error);
       task.unreachable.add(positionKey(block.position));
+    }
+  }
+
+  private isSubmerged(block: Block): boolean {
+    const above = this.bot.blockAt(block.position.offset(0, 1, 0));
+    return above?.name === "water";
+  }
+
+  private async escapeWater(task: GatherTask): Promise<void> {
+    this.bot.pathfinder.setGoal(null);
+    this.bot.clearControlStates();
+
+    // Swim upward until the oxygen bar recovers or the bot exits the water.
+    const deadline = Date.now() + 6_000;
+    try {
+      await this.bot.look(this.bot.entity.yaw, Math.PI / 2, true);
+      this.bot.setControlState("jump", true);
+      this.bot.setControlState("forward", true);
+      while (this.isCurrent(task) && isBotInWater(this.bot) && Date.now() < deadline)
+        await sleep(200);
+    } finally {
+      this.bot.clearControlStates();
+    }
+
+    if (!this.isCurrent(task) || !isBotInWater(this.bot)) return;
+    const shore = findDryStandingPosition(this.bot, 12);
+    if (!shore) return;
+
+    const emergencyMovements = createGatherMovements(this.bot, false, true);
+    this.bot.pathfinder.setMovements(emergencyMovements);
+    try {
+      await this.bot.pathfinder.goto(new goals.GoalNear(shore.x, shore.y, shore.z, 1));
+    } catch (error) {
+      console.error("Could not reach shore while gathering:", error);
+    } finally {
+      this.bot.pathfinder.setMovements(createGatherMovements(this.bot, false));
     }
   }
 
@@ -447,17 +495,22 @@ function bestHarvestTool(bot: Bot, block: Block): Item | null {
   return valid.sort((a, b) => block.digTime(a.type, false, false, false) - block.digTime(b.type, false, false, false))[0] ?? null;
 }
 
-function createGatherMovements(bot: Bot, canMine: boolean): Movements {
+function createGatherMovements(bot: Bot, canMine: boolean, allowWater = false): Movements {
   const movements = new Movements(bot);
   movements.canDig = canMine;
   movements.allow1by1towers = false;
   movements.allowParkour = false;
+  // Gathering routes must never consume collected materials as temporary
+  // scaffolding. Emergency combat barriers are handled separately.
+  movements.scafoldingBlocks = [];
   movements.maxDropDown = 2;
   movements.infiniteLiquidDropdownDistance = false;
+  (movements as Movements & { liquidCost: number }).liquidCost = 20;
   movements.dontCreateFlow = true;
   movements.dontMineUnderFallingBlock = true;
 
   for (const blockName of HAZARDS) {
+    if (allowWater && blockName === "water") continue;
     const block = bot.registry.blocksByName[blockName];
     if (block) movements.blocksToAvoid.add(block.id);
   }
@@ -480,4 +533,35 @@ function sleep(ms: number): Promise<void> {
 
 function isHazard(blockName: string): boolean {
   return HAZARDS.some((hazard) => blockName.includes(hazard));
+}
+
+function isBotInWater(bot: Bot): boolean {
+  const feet = bot.blockAt(bot.entity.position.floored());
+  const head = bot.blockAt(bot.entity.position.floored().offset(0, 1, 0));
+  return feet?.name === "water" || head?.name === "water";
+}
+
+function findDryStandingPosition(bot: Bot, radius: number): Vec3 | null {
+  const origin = bot.entity.position.floored();
+  let best: Vec3 | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  for (let x = -radius; x <= radius; x++) for (let z = -radius; z <= radius; z++) {
+    for (let y = -3; y <= 4; y++) {
+      const feet = origin.offset(x, y, z);
+      const ground = bot.blockAt(feet.offset(0, -1, 0));
+      const feetBlock = bot.blockAt(feet);
+      const headBlock = bot.blockAt(feet.offset(0, 1, 0));
+      if (!ground || !feetBlock || !headBlock) continue;
+      if (ground.boundingBox === "empty" || feetBlock.boundingBox !== "empty" || headBlock.boundingBox !== "empty") continue;
+      if ([ground.name, feetBlock.name, headBlock.name].some(isHazard)) continue;
+
+      const distance = feet.distanceTo(origin);
+      if (distance < bestDistance) {
+        best = feet;
+        bestDistance = distance;
+      }
+    }
+  }
+  return best;
 }
