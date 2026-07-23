@@ -37,10 +37,10 @@ const bot = mineflayer.createBot({
 });
 
 bot.loadPlugin(pathfinder);
-bot.pathfinder.bestHarvestTool = (block) => selectBestMiningTool(bot, block);
 const gathering = new GatheringController(bot);
 let companionPlayerUsername: string | null = null;
 let teleportAfterRespawn = false;
+let stopFollowing: (() => void) | null = null;
 const combat = new RuleBasedCombatController(bot, {
   getProtectedPlayerUsername: () => companionPlayerUsername,
   onCombatStart: () => gathering.setPaused(true),
@@ -54,12 +54,14 @@ bot.on("login", () => {
 bot.once("spawn", () => {
   const { x, y, z } = bot.entity.position;
 
+  bot.pathfinder.bestHarvestTool = (block) => selectBestMiningTool(bot, block);
+
   console.log("Bot spawned successfully.");
   console.log(`Position: x=${x.toFixed(1)}, y=${y.toFixed(1)}, z=${z.toFixed(1)}`);
 
   bot.chat("CompanionBot is online.");
   combat.start();
-  startFollowingNearestPlayer(bot, { isBusy: () => gathering.isBusy || combat.isBusy });
+  stopFollowing = startFollowingNearestPlayer(bot, { isBusy: () => gathering.isBusy || combat.isBusy });
 });
 
 bot.on("playerJoined", (player) => {
@@ -96,6 +98,10 @@ bot.on("error", (error) => {
 });
 
 bot.on("end", (reason) => {
+  gathering.stop();
+  combat.stop();
+  stopFollowing?.();
+  stopFollowing = null;
   console.log("Bot disconnected:", reason);
 });
 

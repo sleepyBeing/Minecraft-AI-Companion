@@ -243,12 +243,19 @@ export class GatheringController {
       .map((name) => this.bot.registry.blocksByName[name]?.id)
       .filter((id): id is number => id !== undefined);
 
-    return this.bot.findBlock({
-      matching: (block) => ids.includes(block.type) &&
-        !task.unreachable.has(positionKey(block.position)) && !this.isSubmerged(block),
+    // Searching by block IDs lets Mineflayer skip chunk sections using their
+    // palettes. A predicate with useExtraInfo forced a full synchronous scan
+    // and could starve keepalive packets long enough for the server to timeout.
+    const positions = this.bot.findBlocks({
+      matching: ids,
       maxDistance: BLOCK_SEARCH_RADIUS,
-      useExtraInfo: true
+      count: 64
     });
+    for (const position of positions) {
+      const block = this.bot.blockAt(position);
+      if (block && !task.unreachable.has(positionKey(position)) && !this.isSubmerged(block)) return block;
+    }
+    return null;
   }
 
   private async harvestBlock(task: GatherTask, block: Block): Promise<void> {
