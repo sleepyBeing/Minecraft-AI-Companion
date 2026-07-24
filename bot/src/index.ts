@@ -7,6 +7,7 @@ import { startFollowingNearestPlayer } from "./followPlayer.js";
 import { GatheringController, selectBestMiningTool } from "./gathering.js";
 import { RuleBasedCombatController } from "./combat.js";
 import { DeathRecoveryController } from "./deathRecovery.js";
+import { startRlBridge } from "./rlBridge.js";
 
 function getRequiredEnvironmentVariable(name: string): string {
   const value = process.env[name];
@@ -41,11 +42,13 @@ bot.loadPlugin(pathfinder);
 const gathering = new GatheringController(bot);
 let companionPlayerUsername: string | null = null;
 let stopFollowing: (() => void) | null = null;
+let stopRlBridge: (() => void) | null = null;
+let rlTrainingActive = false;
 let combat: RuleBasedCombatController;
 const deathRecovery = new DeathRecoveryController(bot, {
   onStart: () => gathering.setPaused(true),
   onEnd: () => {
-    if (!combat.isBusy) gathering.setPaused(false);
+    if (!combat.isBusy && !rlTrainingActive) gathering.setPaused(false);
   },
   returnToPlayer: () => {
     const target = companionPlayerUsername;
@@ -60,7 +63,7 @@ combat = new RuleBasedCombatController(bot, {
   getProtectedPlayerUsername: () => companionPlayerUsername,
   onCombatStart: () => gathering.setPaused(true),
   onCombatEnd: () => {
-    if (!deathRecovery.isBusy) gathering.setPaused(false);
+    if (!deathRecovery.isBusy && !rlTrainingActive) gathering.setPaused(false);
   }
 });
 
@@ -79,7 +82,21 @@ bot.once("spawn", () => {
   bot.chat("CompanionBot is online.");
   combat.start();
   stopFollowing = startFollowingNearestPlayer(bot, {
-    isBusy: () => gathering.isBusy || combat.isBusy || deathRecovery.isBusy
+    isBusy: () => gathering.isBusy || combat.isBusy || deathRecovery.isBusy || rlTrainingActive
+  });
+  stopRlBridge = startRlBridge(bot, {
+    onTrainingStart: () => {
+      rlTrainingActive = true;
+      gathering.setPaused(true);
+      combat.stop();
+      bot.pathfinder.setGoal(null);
+      bot.clearControlStates();
+    },
+    onTrainingEnd: () => {
+      rlTrainingActive = false;
+      if (!deathRecovery.isBusy) gathering.setPaused(false);
+      combat.start();
+    }
   });
 });
 
@@ -89,6 +106,7 @@ bot.on("playerJoined", (player) => {
 });
 
 bot.on("death", () => {
+  if (rlTrainingActive) return;
   const nearbyPlayer = bot.nearestEntity((entity) =>
     entity.type === "player" && entity.username !== bot.username
   );
@@ -123,6 +141,8 @@ bot.on("end", (reason) => {
   gathering.stop();
   combat.stop();
   deathRecovery.stop();
+  stopRlBridge?.();
+  stopRlBridge = null;
   stopFollowing?.();
   stopFollowing = null;
   console.log("Bot disconnected:", reason);
@@ -137,6 +157,11 @@ bot.on("chat", async (username, message) => {
   companionPlayerUsername = username;
 
   console.log(`<${username}> ${message}`);
+
+  if (rlTrainingActive) {
+    bot.chat("RL training currently has control. Close the Python environment to restore commands.");
+    return;
+  }
 
   if (await gathering.handleCommand(username, message)) return;
 

@@ -15,10 +15,12 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "mineflayer": "^4.37.1",
-    "mineflayer-pathfinder": "^2.4.5"
+    "mineflayer-pathfinder": "^2.4.5",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2"
   }

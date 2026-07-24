@@ -15,3 +15,11 @@ server/whitelist.json
 bot/node_modules/
 bot/dist/
 bot/.env
+
+# Python RL environment and training output
+.venv/
+__pycache__/
+*.py[cod]
+agent/models/
+agent/logs/
+agent/runs/
