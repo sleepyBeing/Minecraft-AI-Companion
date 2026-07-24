@@ -1,3 +1,7 @@
 gymnasium>=1.0,<2.0
 numpy>=2.0,<3.0
+tensorboard>=2.18,<3.0
+# TensorFlow doesn't currently publish Python 3.14 wheels. Use Python 3.12 or
+# 3.13 for the training environment.
+tensorflow>=2.20,<3.0; python_version < "3.14"
 websockets>=15.0,<16.0

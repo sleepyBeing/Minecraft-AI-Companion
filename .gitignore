@@ -17,7 +17,7 @@ bot/dist/
 bot/.env
 
 # Python RL environment and training output
-.venv/
+.venv*/
 __pycache__/
 *.py[cod]
 agent/models/
