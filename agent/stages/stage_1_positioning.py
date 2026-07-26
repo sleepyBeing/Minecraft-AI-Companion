@@ -11,11 +11,6 @@ from agent.minecraft_bridge import MinecraftWebSocketBridge
 
 
 class LiveBasicPositioningEnv(BasicPositioningEnv):
-    """Run the stage-one task using the real Mineflayer bot.
-
-    Start the Minecraft server and TypeScript bot before constructing this
-    environment. The bot hosts its WebSocket bridge on localhost port 8765.
-    """
 
     def __init__(
         self,

@@ -40,7 +40,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--gamma", type=unit_interval, default=0.99)
     parser.add_argument("--gae-lambda", type=unit_interval, default=0.95)
     parser.add_argument("--clip-ratio", type=positive_float, default=0.2)
-    parser.add_argument("--entropy-coefficient", type=float, default=0.01)
+    parser.add_argument("--entropy-coefficient", type=float, default=0.05)
     parser.add_argument("--value-coefficient", type=positive_float, default=0.5)
     parser.add_argument("--max-gradient-norm", type=positive_float, default=0.5)
     parser.add_argument("--hidden-size", type=positive_integer, default=128)
@@ -219,6 +219,7 @@ def build_actor_critic(
     inputs = tf.keras.Input(shape=(observation_size,), dtype=tf.float32)
     hidden = tf.keras.layers.Dense(hidden_size, activation="tanh")(inputs)
     hidden = tf.keras.layers.Dense(hidden_size, activation="tanh")(hidden)
+    # policy_logits outputs probabilities for each action, value outputs a single scalar value that represents the expected return
     policy_logits = tf.keras.layers.Dense(action_count, name="policy_logits")(hidden)
     value = tf.keras.layers.Dense(1, name="value")(hidden)
     return tf.keras.Model(inputs=inputs, outputs=(policy_logits, value))
