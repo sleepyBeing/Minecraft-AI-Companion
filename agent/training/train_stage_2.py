@@ -614,7 +614,8 @@ def run_live_combat_preflight(
         options={
             "bot_position": [4.5, 7.5],
             "target_position": [10.5, 7.5],
-            "bot_yaw": np.pi / 2.0,
+            # Mineflayer yaw -pi/2 faces positive world X.
+            "bot_yaw": -np.pi / 2.0,
         },
     )
     starting_distance = float(info["distance_to_target"])

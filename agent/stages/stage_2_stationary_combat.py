@@ -234,8 +234,9 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
         if action == StationaryCombatAction.WAIT:
             return
 
+        # Match Mineflayer/Minecraft yaw: yaw 0 faces -Z and -pi/2 faces +X.
         forward = np.array(
-            [np.sin(self.bot_yaw), np.cos(self.bot_yaw)], dtype=np.float32
+            [-np.sin(self.bot_yaw), -np.cos(self.bot_yaw)], dtype=np.float32
         )
         right = np.array([forward[1], -forward[0]], dtype=np.float32)
         direction = {
