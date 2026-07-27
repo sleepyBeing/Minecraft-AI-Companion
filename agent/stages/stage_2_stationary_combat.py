@@ -44,7 +44,9 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
     ROOM_SIZE = 15.0
     MAX_HEALTH = 20.0
     ZOMBIE_MAX_HEALTH = 20.0
-    ATTACK_RANGE = 3.0
+    # Use a safety margin below Minecraft's nominal three-block reach so the
+    # observation and reward agree with server-side hit validation.
+    ATTACK_RANGE = 2.75
     EPISODE_SECONDS = 60.0
     STEP_SECONDS = 0.1
     MOVE_SPEED = 4.3
@@ -202,6 +204,10 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
                 "cooldown_blocked": cooldown_blocked,
                 "attack_landed": attack_landed,
                 "confirmed_kill": terminated,
+                "attack_distance": (
+                    distance_before_action if attack_selected else None
+                ),
+                "server_health_verified": False,
                 "success": terminated,
                 "source": "simulation",
             }
@@ -400,6 +406,10 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
                 "cooldown_blocked": bool(attack_result["cooldownBlocked"]),
                 "attack_landed": bool(attack_result["attackLanded"]),
                 "confirmed_kill": bool(attack_result["confirmedKill"]),
+                "attack_distance": attack_result["attackDistance"],
+                "server_health_verified": bool(
+                    attack_result["serverHealthVerified"]
+                ),
                 "success": terminated,
                 "source": "minecraft",
             }

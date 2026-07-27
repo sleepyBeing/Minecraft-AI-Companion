@@ -1,4 +1,5 @@
 import type { Bot } from "mineflayer";
+import type { Entity } from "prismarine-entity";
 import { WebSocket, WebSocketServer } from "ws";
 
 export interface RlBridgeOptions {
@@ -32,8 +33,12 @@ interface ArenaOrigin {
 const ROOM_SIZE = 15;
 const ACTION_DURATION_MS = 100;
 const TURN_RADIANS = Math.PI * 0.1;
-const ATTACK_RANGE = 3;
+// Leave a margin below Minecraft's nominal three-block survival reach.  A
+// horizontal centre-to-centre distance of exactly three blocks can still put
+// the target hitbox outside server-validated reach.
+const ATTACK_RANGE = 2.75;
 const IRON_SWORD_COOLDOWN_SECONDS = 0.625;
+const ATTACK_AIM_SETTLE_MS = 75;
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8765;
 
@@ -384,13 +389,17 @@ class StageTwoArena {
   private elapsedSeconds = 0;
   private nextAttackTime = 0;
   private pendingAttackUntil = 0;
+  private healthObjectiveReady = false;
   private lastActionResult = createEmptyAttackResult();
 
   constructor(private readonly bot: Bot) {
     bot.on("entityHurt", (entity) => {
       if (!entity || entity.id !== this.targetEntityId) return;
       if (entity.health !== undefined && entity.health !== null)
-        this.lastKnownTargetHealth = Math.max(0, entity.health);
+        this.lastKnownTargetHealth = Math.min(
+          this.lastKnownTargetHealth,
+          Math.max(0, entity.health)
+        );
       if (Date.now() <= this.pendingAttackUntil)
         this.lastActionResult.attackLanded = true;
     });
@@ -435,6 +444,10 @@ class StageTwoArena {
     await this.command("attribute @s minecraft:max_health base set 20");
     await this.command("effect give @s minecraft:instant_health 1 255 true");
     await this.command("effect give @s minecraft:saturation 999999 0 true");
+    // Native 1.21.11 currently has a player hitbox/physics edge case affecting
+    // Mineflayer at the default scale.  This imperceptible scale adjustment
+    // keeps the server and client collision/reach calculations aligned.
+    await this.command("attribute @s minecraft:scale base set 0.9999999");
     await this.command("kill @e[type=minecraft:zombie,tag=rl_stage2_target]");
     await this.clearArenaEntities();
     await this.command("give @s minecraft:iron_sword 1");
@@ -468,6 +481,9 @@ class StageTwoArena {
       throw new Error("The stage-two zombie did not spawn. Ensure difficulty is not peaceful.");
     this.targetEntityId = targetEntity.id;
     this.lastKnownTargetHealth = targetEntity.health ?? 20;
+    await this.ensureHealthObjective();
+    const serverHealth = await this.queryTargetHealthFromServer();
+    if (serverHealth !== null) this.lastKnownTargetHealth = serverHealth;
 
     const resetDistance = Math.hypot(
       this.bot.entity.position.x - spawn.x,
@@ -508,8 +524,9 @@ class StageTwoArena {
           this.lastActionResult.attackSelected = true;
           const target = this.getTargetEntity();
           const distance = target
-            ? this.horizontalDistanceTo(target.position.x, target.position.z)
+            ? this.attackDistanceTo(target)
             : this.horizontalDistanceToWorldTarget();
+          this.lastActionResult.attackDistance = distance;
           this.lastActionResult.outOfRange = distance > ATTACK_RANGE;
           this.lastActionResult.cooldownBlocked =
             !this.lastActionResult.outOfRange &&
@@ -521,11 +538,25 @@ class StageTwoArena {
               target.position.offset(0, target.height * 0.65, 0),
               true
             );
-            this.pendingAttackUntil = Date.now() + 500;
+            // Give the server one tick to process the forced rotation before
+            // sending the interact-entity attack packet.
+            await sleep(ATTACK_AIM_SETTLE_MS);
+            this.pendingAttackUntil = Date.now() + 1_000;
             this.bot.attack(target);
             this.nextAttackTime =
               this.elapsedSeconds + IRON_SWORD_COOLDOWN_SECONDS;
             await this.waitForAttackResult(healthBeforeAttack);
+            const serverHealth = await this.queryTargetHealthFromServer();
+            if (serverHealth !== null) {
+              this.lastActionResult.serverHealthVerified = true;
+              this.lastKnownTargetHealth = serverHealth;
+              if (serverHealth < healthBeforeAttack)
+                this.lastActionResult.attackLanded = true;
+              if (serverHealth <= 0) {
+                this.targetConfirmedDead = true;
+                this.lastActionResult.confirmedKill = true;
+              }
+            }
           }
           break;
         }
@@ -545,7 +576,10 @@ class StageTwoArena {
     const botZ = this.bot.entity.position.z - this.origin.z;
     const target = this.getTargetEntity();
     if (target?.health !== undefined && target.health !== null)
-      this.lastKnownTargetHealth = Math.max(0, target.health);
+      this.lastKnownTargetHealth = Math.min(
+        this.lastKnownTargetHealth,
+        Math.max(0, target.health)
+      );
 
     const targetAlive = !this.targetConfirmedDead;
     return {
@@ -585,7 +619,7 @@ class StageTwoArena {
   }
 
   private async waitForAttackResult(healthBeforeAttack: number): Promise<void> {
-    const deadline = Date.now() + 300;
+    const deadline = Date.now() + 500;
     while (Date.now() < deadline) {
       const target = this.getTargetEntity();
       if (
@@ -600,6 +634,58 @@ class StageTwoArena {
       }
       await sleep(25);
     }
+  }
+
+  private attackDistanceTo(target: Entity): number {
+    const eye = this.bot.entity.position.offset(0, 1.62, 0);
+    const targetCenter = target.position.offset(0, target.height * 0.5, 0);
+    return eye.distanceTo(targetCenter);
+  }
+
+  private async ensureHealthObjective(): Promise<void> {
+    if (this.healthObjectiveReady) return;
+    // Objectives persist with the world, so "already exists" is harmless.
+    await this.command("scoreboard objectives add rl_stage2_health dummy");
+    this.healthObjectiveReady = true;
+  }
+
+  /**
+   * Mineflayer's living-entity health metadata is not consistently refreshed
+   * on every supported protocol.  Read the zombie's actual NBT health through
+   * a scoreboard so rewards are based on server state rather than stale client
+   * metadata.
+   */
+  private async queryTargetHealthFromServer(): Promise<number | null> {
+    if (this.targetConfirmedDead) return 0;
+    await this.ensureHealthObjective();
+    // A missing entity must not reuse the previous zombie's score.
+    await this.command("scoreboard players set #target rl_stage2_health -1");
+    await this.command(
+      "execute store result score #target rl_stage2_health run data get entity " +
+      "@e[type=minecraft:zombie,tag=rl_stage2_target,limit=1] Health 100"
+    );
+
+    return new Promise<number | null>((resolve) => {
+      let settled = false;
+      const finish = (health: number | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        this.bot.off("messagestr", onMessage);
+        resolve(health);
+      };
+      const onMessage = (message: string) => {
+        if (!message.includes("rl_stage2_health")) return;
+        const match = message.match(/#target has (-?\d+)/);
+        if (match) {
+          const storedHealth = Number(match[1]);
+          finish(storedHealth < 0 ? null : storedHealth / 100);
+        }
+      };
+      const timeout = setTimeout(() => finish(null), 750);
+      this.bot.on("messagestr", onMessage);
+      this.bot.chat("/scoreboard players get #target rl_stage2_health");
+    });
   }
 
   private horizontalDistanceTo(x: number, z: number): number {
@@ -690,7 +776,9 @@ function createEmptyAttackResult() {
     outOfRange: false,
     cooldownBlocked: false,
     attackLanded: false,
-    confirmedKill: false
+    confirmedKill: false,
+    attackDistance: null as number | null,
+    serverHealthVerified: false
   };
 }
 
