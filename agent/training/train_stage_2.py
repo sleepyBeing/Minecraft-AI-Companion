@@ -231,6 +231,31 @@ def main() -> None:
                     np.sum(rollout["invalid_attacks"]),
                     step=step,
                 )
+                tf.summary.scalar(
+                    "combat/attack_selections",
+                    np.sum(rollout["attack_selections"]),
+                    step=step,
+                )
+                tf.summary.scalar(
+                    "combat/valid_attack_attempts",
+                    np.sum(rollout["valid_attack_attempts"]),
+                    step=step,
+                )
+                tf.summary.scalar(
+                    "combat/cooldown_blocked_attacks",
+                    np.sum(rollout["cooldown_blocked_attacks"]),
+                    step=step,
+                )
+                tf.summary.scalar(
+                    "combat/confirmed_hits",
+                    np.sum(rollout["confirmed_hits"]),
+                    step=step,
+                )
+                tf.summary.scalar(
+                    "positioning/mean_approach_reward",
+                    np.mean(rollout["approach_rewards"]),
+                    step=step,
+                )
             summary_writer.flush()
 
             if step >= next_checkpoint_step:
@@ -242,6 +267,9 @@ def main() -> None:
                 f"step={step:,}/{args.timesteps:,} "
                 f"reward={np.mean(rollout['rewards']):+.3f} "
                 f"damage={np.sum(rollout['damage_dealt']):.1f} "
+                f"attacks={int(np.sum(rollout['attack_selections']))} "
+                f"valid={int(np.sum(rollout['valid_attack_attempts']))} "
+                f"hits={int(np.sum(rollout['confirmed_hits']))} "
                 f"invalid_attacks={int(np.sum(rollout['invalid_attacks']))} "
                 f"policy_loss={metrics['policy_loss']:.4f} "
                 f"value_loss={metrics['value_loss']:.4f}"
@@ -270,7 +298,12 @@ class StageTwoEpisodeState:
         self.episode_length = 0
         self.episode_number = 0
         self.damage_dealt = 0.0
+        self.attack_selections = 0
+        self.valid_attack_attempts = 0
         self.invalid_attacks = 0
+        self.cooldown_blocked_attacks = 0
+        self.confirmed_hits = 0
+        self.range_entries = 0
 
 
 def collect_stage_two_rollout(
@@ -295,7 +328,12 @@ def collect_stage_two_rollout(
     terminated_flags: list[bool] = []
     episode_done_flags: list[bool] = []
     damages: list[float] = []
+    approach_rewards: list[float] = []
+    attack_selections: list[float] = []
+    valid_attack_attempts: list[float] = []
     invalid_attacks: list[float] = []
+    cooldown_blocked_attacks: list[float] = []
+    confirmed_hits: list[float] = []
     observation = initial_observation
 
     for _ in range(rollout_size):
@@ -313,7 +351,13 @@ def collect_stage_two_rollout(
         next_value = float(next_value_tensor[0, 0].numpy())
         episode_done = terminated or truncated
         damage = float(info["damage_dealt"])
+        approach_reward = float(info["approach_reward"])
+        attack_selected = bool(info["attack_selected"])
+        valid_attack_attempt = bool(info["valid_attack_attempt"])
         invalid_attack = bool(info["invalid_attack"])
+        cooldown_blocked = bool(info["cooldown_blocked"])
+        confirmed_hit = damage > 0
+        entered_attack_range = bool(info["entered_attack_range"])
 
         observations.append(observation.copy())
         actions.append(action)
@@ -324,12 +368,22 @@ def collect_stage_two_rollout(
         terminated_flags.append(terminated)
         episode_done_flags.append(episode_done)
         damages.append(damage)
+        approach_rewards.append(approach_reward)
+        attack_selections.append(float(attack_selected))
+        valid_attack_attempts.append(float(valid_attack_attempt))
         invalid_attacks.append(float(invalid_attack))
+        cooldown_blocked_attacks.append(float(cooldown_blocked))
+        confirmed_hits.append(float(confirmed_hit))
 
         episode_state.episode_return += reward
         episode_state.episode_length += 1
         episode_state.damage_dealt += damage
+        episode_state.attack_selections += int(attack_selected)
+        episode_state.valid_attack_attempts += int(valid_attack_attempt)
         episode_state.invalid_attacks += int(invalid_attack)
+        episode_state.cooldown_blocked_attacks += int(cooldown_blocked)
+        episode_state.confirmed_hits += int(confirmed_hit)
+        episode_state.range_entries += int(entered_attack_range)
         observation = next_observation
 
         if episode_done:
@@ -343,7 +397,12 @@ def collect_stage_two_rollout(
                 final_distance=float(info["distance_to_target"]),
                 target_health=float(info["target_health"]),
                 damage_dealt=episode_state.damage_dealt,
+                attack_selections=episode_state.attack_selections,
+                valid_attack_attempts=episode_state.valid_attack_attempts,
                 invalid_attacks=episode_state.invalid_attacks,
+                cooldown_blocked_attacks=episode_state.cooldown_blocked_attacks,
+                confirmed_hits=episode_state.confirmed_hits,
+                range_entries=episode_state.range_entries,
             )
             with summary_writer.as_default():
                 tf.summary.scalar(
@@ -371,11 +430,31 @@ def collect_stage_two_rollout(
                     episode_state.invalid_attacks,
                     step=episode_state.episode_number,
                 )
+                tf.summary.scalar(
+                    "episode/attack_selections",
+                    episode_state.attack_selections,
+                    step=episode_state.episode_number,
+                )
+                tf.summary.scalar(
+                    "episode/valid_attack_attempts",
+                    episode_state.valid_attack_attempts,
+                    step=episode_state.episode_number,
+                )
+                tf.summary.scalar(
+                    "episode/confirmed_hits",
+                    episode_state.confirmed_hits,
+                    step=episode_state.episode_number,
+                )
             observation, _ = environment.reset()
             episode_state.episode_return = 0.0
             episode_state.episode_length = 0
             episode_state.damage_dealt = 0.0
+            episode_state.attack_selections = 0
+            episode_state.valid_attack_attempts = 0
             episode_state.invalid_attacks = 0
+            episode_state.cooldown_blocked_attacks = 0
+            episode_state.confirmed_hits = 0
+            episode_state.range_entries = 0
 
     reward_array = np.asarray(rewards, dtype=np.float32)
     value_array = np.asarray(values, dtype=np.float32)
@@ -404,7 +483,16 @@ def collect_stage_two_rollout(
         "advantages": advantages,
         "returns": returns,
         "damage_dealt": np.asarray(damages, dtype=np.float32),
+        "approach_rewards": np.asarray(approach_rewards, dtype=np.float32),
+        "attack_selections": np.asarray(attack_selections, dtype=np.float32),
+        "valid_attack_attempts": np.asarray(
+            valid_attack_attempts, dtype=np.float32
+        ),
         "invalid_attacks": np.asarray(invalid_attacks, dtype=np.float32),
+        "cooldown_blocked_attacks": np.asarray(
+            cooldown_blocked_attacks, dtype=np.float32
+        ),
+        "confirmed_hits": np.asarray(confirmed_hits, dtype=np.float32),
     }
     return rollout, observation, episode_state
 
@@ -422,7 +510,12 @@ class StageTwoEpisodeCsvLogger:
                 "final_distance",
                 "target_health",
                 "damage_dealt",
+                "attack_selections",
+                "valid_attack_attempts",
                 "invalid_attacks",
+                "cooldown_blocked_attacks",
+                "confirmed_hits",
+                "range_entries",
             ]
         )
 
@@ -436,7 +529,12 @@ class StageTwoEpisodeCsvLogger:
         final_distance: float,
         target_health: float,
         damage_dealt: float,
+        attack_selections: int,
+        valid_attack_attempts: int,
         invalid_attacks: int,
+        cooldown_blocked_attacks: int,
+        confirmed_hits: int,
+        range_entries: int,
     ) -> None:
         self._writer.writerow(
             [
@@ -447,7 +545,12 @@ class StageTwoEpisodeCsvLogger:
                 final_distance,
                 target_health,
                 damage_dealt,
+                attack_selections,
+                valid_attack_attempts,
                 invalid_attacks,
+                cooldown_blocked_attacks,
+                confirmed_hits,
+                range_entries,
             ]
         )
         self._file.flush()

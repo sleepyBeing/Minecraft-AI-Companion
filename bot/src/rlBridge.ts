@@ -380,10 +380,29 @@ class StageTwoArena {
   private targetPosition: [number, number] = [10.5, 7.5];
   private targetEntityId: number | null = null;
   private lastKnownTargetHealth = 20;
+  private targetConfirmedDead = false;
   private elapsedSeconds = 0;
   private nextAttackTime = 0;
+  private pendingAttackUntil = 0;
+  private lastActionResult = createEmptyAttackResult();
 
-  constructor(private readonly bot: Bot) {}
+  constructor(private readonly bot: Bot) {
+    bot.on("entityHurt", (entity) => {
+      if (!entity || entity.id !== this.targetEntityId) return;
+      if (entity.health !== undefined && entity.health !== null)
+        this.lastKnownTargetHealth = Math.max(0, entity.health);
+      if (Date.now() <= this.pendingAttackUntil)
+        this.lastActionResult.attackLanded = true;
+    });
+    bot.on("entityDead", (entity) => {
+      if (!entity || entity.id !== this.targetEntityId) return;
+      this.targetConfirmedDead = true;
+      this.lastKnownTargetHealth = 0;
+      this.lastActionResult.confirmedKill = true;
+      if (Date.now() <= this.pendingAttackUntil)
+        this.lastActionResult.attackLanded = true;
+    });
+  }
 
   async reset(request: BridgeRequest) {
     const botPosition = validatePosition(request.botPosition ?? [4.5, 7.5], "botPosition");
@@ -405,8 +424,11 @@ class StageTwoArena {
     this.targetPosition = targetPosition;
     this.targetEntityId = null;
     this.lastKnownTargetHealth = 20;
+    this.targetConfirmedDead = false;
     this.elapsedSeconds = 0;
     this.nextAttackTime = 0;
+    this.pendingAttackUntil = 0;
+    this.lastActionResult = createEmptyAttackResult();
 
     await this.command("clear @s");
     await this.command("effect clear @s");
@@ -459,6 +481,7 @@ class StageTwoArena {
 
   async step(action: number) {
     this.bot.clearControlStates();
+    this.lastActionResult = createEmptyAttackResult();
     try {
       switch (action) {
         case 0:
@@ -482,19 +505,27 @@ class StageTwoArena {
           await this.bot.look(this.bot.entity.yaw + TURN_RADIANS, 0, true);
           break;
         case 7: {
+          this.lastActionResult.attackSelected = true;
           const target = this.getTargetEntity();
-          if (
-            target &&
-            this.horizontalDistanceTo(target.position.x, target.position.z) <= ATTACK_RANGE &&
-            this.elapsedSeconds >= this.nextAttackTime
-          ) {
+          const distance = target
+            ? this.horizontalDistanceTo(target.position.x, target.position.z)
+            : this.horizontalDistanceToWorldTarget();
+          this.lastActionResult.outOfRange = distance > ATTACK_RANGE;
+          this.lastActionResult.cooldownBlocked =
+            !this.lastActionResult.outOfRange &&
+            this.elapsedSeconds < this.nextAttackTime;
+          if (target && !this.lastActionResult.outOfRange && !this.lastActionResult.cooldownBlocked) {
+            this.lastActionResult.validAttackAttempt = true;
+            const healthBeforeAttack = this.lastKnownTargetHealth;
             await this.bot.lookAt(
               target.position.offset(0, target.height * 0.65, 0),
               true
             );
+            this.pendingAttackUntil = Date.now() + 500;
             this.bot.attack(target);
             this.nextAttackTime =
               this.elapsedSeconds + IRON_SWORD_COOLDOWN_SECONDS;
+            await this.waitForAttackResult(healthBeforeAttack);
           }
           break;
         }
@@ -516,8 +547,7 @@ class StageTwoArena {
     if (target?.health !== undefined && target.health !== null)
       this.lastKnownTargetHealth = Math.max(0, target.health);
 
-    const targetAlive = target !== null;
-    if (!targetAlive) this.lastKnownTargetHealth = 0;
+    const targetAlive = !this.targetConfirmedDead;
     return {
       botPosition: [botX, botZ],
       targetPosition: [...this.targetPosition],
@@ -526,17 +556,50 @@ class StageTwoArena {
       hasIronSword: this.bot.heldItem?.name === "iron_sword",
       targetHealth: this.lastKnownTargetHealth,
       targetAlive,
+      targetVisible: target !== null,
       distance: this.horizontalDistanceToWorldTarget(),
       attackReady: this.elapsedSeconds >= this.nextAttackTime,
+      attackResult: { ...this.lastActionResult },
       elapsedSeconds: this.elapsedSeconds,
       roomSize: ROOM_SIZE
     };
   }
 
   private getTargetEntity() {
-    if (this.targetEntityId === null) return null;
-    const entity = this.bot.entities[this.targetEntityId];
-    return entity?.name === "zombie" ? entity : null;
+    if (this.targetConfirmedDead || !this.origin) return null;
+    if (this.targetEntityId !== null) {
+      const entity = this.bot.entities[this.targetEntityId];
+      if (entity?.name === "zombie") return entity;
+    }
+
+    const expected = this.worldPosition(this.targetPosition);
+    const reacquired = Object.values(this.bot.entities).find((entity) =>
+      entity.name === "zombie" &&
+      Math.hypot(entity.position.x - expected.x, entity.position.z - expected.z) <= 2
+    );
+    if (reacquired) {
+      this.targetEntityId = reacquired.id;
+      return reacquired;
+    }
+    return null;
+  }
+
+  private async waitForAttackResult(healthBeforeAttack: number): Promise<void> {
+    const deadline = Date.now() + 300;
+    while (Date.now() < deadline) {
+      const target = this.getTargetEntity();
+      if (
+        this.targetConfirmedDead ||
+        (target?.health !== undefined &&
+          target.health !== null &&
+          target.health < healthBeforeAttack)
+      ) {
+        if (target?.health !== undefined && target.health !== null)
+          this.lastKnownTargetHealth = Math.max(0, target.health);
+        return;
+      }
+      await sleep(25);
+    }
   }
 
   private horizontalDistanceTo(x: number, z: number): number {
@@ -618,6 +681,17 @@ function validatePosition(position: [number, number], name: string): [number, nu
 
 function distanceBetween(a: [number, number], b: [number, number]): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+function createEmptyAttackResult() {
+  return {
+    attackSelected: false,
+    validAttackAttempt: false,
+    outOfRange: false,
+    cooldownBlocked: false,
+    attackLanded: false,
+    confirmedKill: false
+  };
 }
 
 function send(socket: WebSocket, response: object): void {

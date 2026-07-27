@@ -54,8 +54,10 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
 
     DAMAGE_REWARD_SCALE = 1.0
     DEFEAT_REWARD = 20.0
+    APPROACH_REWARD_SCALE = 0.2
+    ATTACK_RANGE_ENTRY_REWARD = 0.5
     TIME_PENALTY = 0.01
-    OUT_OF_RANGE_ATTACK_PENALTY = 0.25
+    OUT_OF_RANGE_ATTACK_PENALTY = 0.05
     MINIMUM_START_DISTANCE = 5.0
     MAXIMUM_START_DISTANCE = 8.0
 
@@ -87,6 +89,8 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
         self.target_alive = True
         self.elapsed_seconds = 0.0
         self.next_attack_time = 0.0
+        self.attack_range_bonus_awarded = False
+        self.target_visible = True
 
     def reset(
         self,
@@ -121,6 +125,8 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
         self.target_alive = True
         self.elapsed_seconds = 0.0
         self.next_attack_time = 0.0
+        self.attack_range_bonus_awarded = False
+        self.target_visible = True
         return self._get_observation(), self._get_info()
 
     def step(
@@ -132,18 +138,26 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
         selected_action = StationaryCombatAction(action)
         distance_before_action = self._distance()
         damage_dealt = 0.0
-        invalid_attack = False
+        attack_selected = selected_action == StationaryCombatAction.ATTACK
+        invalid_attack = attack_selected and distance_before_action > self.ATTACK_RANGE
+        valid_attack_attempt = False
+        cooldown_blocked = False
+        attack_landed = False
 
-        if selected_action == StationaryCombatAction.ATTACK:
-            invalid_attack = distance_before_action > self.ATTACK_RANGE
+        if attack_selected:
+            cooldown_blocked = (
+                not invalid_attack and self.elapsed_seconds < self.next_attack_time
+            )
             if (
                 not invalid_attack
                 and self.target_alive
-                and self.elapsed_seconds >= self.next_attack_time
+                and not cooldown_blocked
             ):
+                valid_attack_attempt = True
                 damage_dealt = min(self.IRON_SWORD_DAMAGE, self.target_health)
                 self.target_health -= damage_dealt
                 self.target_alive = self.target_health > 0
+                attack_landed = damage_dealt > 0
                 self.next_attack_time = (
                     self.elapsed_seconds + self.ATTACK_COOLDOWN_SECONDS
                 )
@@ -151,7 +165,23 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
             self._apply_movement_action(selected_action)
 
         self.elapsed_seconds += self.STEP_SECONDS
-        reward = damage_dealt * self.DAMAGE_REWARD_SCALE - self.TIME_PENALTY
+        distance_after_action = self._distance()
+        distance_change = distance_before_action - distance_after_action
+        approach_reward = distance_change * self.APPROACH_REWARD_SCALE
+        entered_attack_range = (
+            not self.attack_range_bonus_awarded
+            and distance_before_action > self.ATTACK_RANGE
+            and distance_after_action <= self.ATTACK_RANGE
+        )
+        if entered_attack_range:
+            self.attack_range_bonus_awarded = True
+
+        reward = (
+            damage_dealt * self.DAMAGE_REWARD_SCALE
+            + approach_reward
+            + (self.ATTACK_RANGE_ENTRY_REWARD if entered_attack_range else 0.0)
+            - self.TIME_PENALTY
+        )
         if invalid_attack:
             reward -= self.OUT_OF_RANGE_ATTACK_PENALTY
         if not self.target_alive:
@@ -163,7 +193,15 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
         info.update(
             {
                 "damage_dealt": damage_dealt,
+                "distance_change": distance_change,
+                "approach_reward": approach_reward,
+                "entered_attack_range": entered_attack_range,
+                "attack_selected": attack_selected,
+                "valid_attack_attempt": valid_attack_attempt,
                 "invalid_attack": invalid_attack,
+                "cooldown_blocked": cooldown_blocked,
+                "attack_landed": attack_landed,
+                "confirmed_kill": terminated,
                 "success": terminated,
                 "source": "simulation",
             }
@@ -235,6 +273,7 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
             "has_iron_sword": self.has_iron_sword,
             "target_health": self.target_health,
             "target_alive": self.target_alive,
+            "target_visible": self.target_visible,
             "in_attack_range": self._distance() <= self.ATTACK_RANGE,
             "attack_ready": self.elapsed_seconds >= self.next_attack_time,
             "bot_position": self.bot_position.copy(),
@@ -316,14 +355,29 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
         distance_before_action = self._distance()
         health_before_action = self.target_health
         response = self.bridge.request("stage2.step", action=int(action))
+        state = response["state"]
+        attack_result = state["attackResult"]
         self._apply_live_state(response["state"])
 
         damage_dealt = max(0.0, health_before_action - self.target_health)
-        invalid_attack = (
-            action == StationaryCombatAction.ATTACK
+        distance_after_action = self._distance()
+        distance_change = distance_before_action - distance_after_action
+        approach_reward = distance_change * self.APPROACH_REWARD_SCALE
+        entered_attack_range = (
+            not self.attack_range_bonus_awarded
             and distance_before_action > self.ATTACK_RANGE
+            and distance_after_action <= self.ATTACK_RANGE
         )
-        reward = damage_dealt * self.DAMAGE_REWARD_SCALE - self.TIME_PENALTY
+        if entered_attack_range:
+            self.attack_range_bonus_awarded = True
+
+        invalid_attack = bool(attack_result["outOfRange"])
+        reward = (
+            damage_dealt * self.DAMAGE_REWARD_SCALE
+            + approach_reward
+            + (self.ATTACK_RANGE_ENTRY_REWARD if entered_attack_range else 0.0)
+            - self.TIME_PENALTY
+        )
         if invalid_attack:
             reward -= self.OUT_OF_RANGE_ATTACK_PENALTY
 
@@ -335,7 +389,17 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
         info.update(
             {
                 "damage_dealt": damage_dealt,
+                "distance_change": distance_change,
+                "approach_reward": approach_reward,
+                "entered_attack_range": entered_attack_range,
+                "attack_selected": bool(attack_result["attackSelected"]),
+                "valid_attack_attempt": bool(
+                    attack_result["validAttackAttempt"]
+                ),
                 "invalid_attack": invalid_attack,
+                "cooldown_blocked": bool(attack_result["cooldownBlocked"]),
+                "attack_landed": bool(attack_result["attackLanded"]),
+                "confirmed_kill": bool(attack_result["confirmedKill"]),
                 "success": terminated,
                 "source": "minecraft",
             }
@@ -359,6 +423,7 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
             self.has_iron_sword = bool(state["hasIronSword"])
             self.target_health = float(state["targetHealth"])
             self.target_alive = bool(state["targetAlive"])
+            self.target_visible = bool(state["targetVisible"])
             self.elapsed_seconds = float(state["elapsedSeconds"])
             self.next_attack_time = (
                 self.elapsed_seconds if state["attackReady"] else self.elapsed_seconds + 0.001
