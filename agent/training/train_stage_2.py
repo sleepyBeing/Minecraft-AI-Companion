@@ -592,14 +592,30 @@ def transfer_stage_one_weights(
 
     source_kernel, source_bias = source_hidden_one.get_weights()
     target_kernel, _ = target_hidden_one.get_weights()
+    # Preserve stage-one positioning exactly at transfer time. New stage-two
+    # observation rows must begin as neutral inputs instead of injecting random
+    # offsets into the shared hidden representation.
+    target_kernel.fill(0.0)
     target_kernel[: source_kernel.shape[0], :] = source_kernel
+    # Stage one always supplied 0 for "has equipment", so this row never
+    # learned a meaningful response. Stage two supplies 1 for an equipped
+    # sword; zero it to prevent that distribution change from perturbing the
+    # transferred policy. PPO can learn it normally from this neutral start.
+    target_kernel[5, :] = 0.0
     target_hidden_one.set_weights([target_kernel, source_bias])
     target_hidden_two.set_weights(source_hidden_two.get_weights())
 
     source_policy_kernel, source_policy_bias = source_policy.get_weights()
     target_policy_kernel, target_policy_bias = target_policy.get_weights()
+    target_policy_kernel.fill(0.0)
+    target_policy_bias.fill(0.0)
     target_policy_kernel[:, : source_policy_kernel.shape[1]] = source_policy_kernel
     target_policy_bias[: source_policy_bias.shape[0]] = source_policy_bias
+    # The attack action does not exist in stage one. Start it with a controlled
+    # low probability rather than an arbitrary random logit, while retaining
+    # enough probability for PPO exploration.
+    target_policy_kernel[:, source_policy_kernel.shape[1]] = 0.0
+    target_policy_bias[source_policy_bias.shape[0]] = -1.5
     target_policy.set_weights([target_policy_kernel, target_policy_bias])
     target_value.set_weights(source_value.get_weights())
 

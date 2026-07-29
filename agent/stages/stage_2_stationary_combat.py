@@ -46,7 +46,7 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
     ZOMBIE_MAX_HEALTH = 20.0
     # Use a safety margin below Minecraft's nominal three-block reach so the
     # observation and reward agree with server-side hit validation.
-    ATTACK_RANGE = 2.75
+    ATTACK_RANGE = 2.5
     EPISODE_SECONDS = 60.0
     STEP_SECONDS = 0.1
     MOVE_SPEED = 4.3
@@ -56,7 +56,9 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
 
     DAMAGE_REWARD_SCALE = 1.0
     DEFEAT_REWARD = 20.0
-    APPROACH_REWARD_SCALE = 0.2
+    # Keep the positioning signal learned in stage one while combat behavior is
+    # still sparse. This can be annealed later once reliable hits are learned.
+    APPROACH_REWARD_SCALE = 1.0
     ATTACK_RANGE_ENTRY_REWARD = 0.5
     TIME_PENALTY = 0.01
     OUT_OF_RANGE_ATTACK_PENALTY = 0.05
@@ -208,6 +210,8 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
                     distance_before_action if attack_selected else None
                 ),
                 "server_health_verified": False,
+                "movement_settled": True,
+                "attack_packet_sent": valid_attack_attempt,
                 "success": terminated,
                 "source": "simulation",
             }
@@ -411,6 +415,8 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
                 "server_health_verified": bool(
                     attack_result["serverHealthVerified"]
                 ),
+                "movement_settled": bool(attack_result["movementSettled"]),
+                "attack_packet_sent": bool(attack_result["attackPacketSent"]),
                 "success": terminated,
                 "source": "minecraft",
             }

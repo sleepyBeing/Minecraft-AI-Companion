@@ -36,9 +36,11 @@ const TURN_RADIANS = Math.PI * 0.1;
 // Leave a margin below Minecraft's nominal three-block survival reach.  A
 // horizontal centre-to-centre distance of exactly three blocks can still put
 // the target hitbox outside server-validated reach.
-const ATTACK_RANGE = 2.75;
+const ATTACK_RANGE = 2.5;
 const IRON_SWORD_COOLDOWN_SECONDS = 0.625;
 const ATTACK_AIM_SETTLE_MS = 75;
+const MOVEMENT_SETTLE_TIMEOUT_MS = 450;
+const SETTLED_HORIZONTAL_SPEED = 0.025;
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 8765;
 
@@ -522,17 +524,28 @@ class StageTwoArena {
           break;
         case 7: {
           this.lastActionResult.attackSelected = true;
-          const target = this.getTargetEntity();
-          const distance = target
+          let target = this.getTargetEntity();
+          let distance = target
             ? this.attackDistanceTo(target)
             : this.horizontalDistanceToWorldTarget();
           this.lastActionResult.attackDistance = distance;
-          this.lastActionResult.outOfRange = distance > ATTACK_RANGE;
+          this.lastActionResult.outOfRange =
+            !target || distance > ATTACK_RANGE;
+          if (this.lastActionResult.outOfRange) break;
+
+          const movementSettled = await this.waitForMovementToSettle();
+          this.lastActionResult.movementSettled = movementSettled;
+          target = this.getTargetEntity();
+          distance = target
+            ? this.attackDistanceTo(target)
+            : this.horizontalDistanceToWorldTarget();
+          this.lastActionResult.attackDistance = distance;
+          this.lastActionResult.outOfRange =
+            !movementSettled || !target || distance > ATTACK_RANGE;
           this.lastActionResult.cooldownBlocked =
             !this.lastActionResult.outOfRange &&
             this.elapsedSeconds < this.nextAttackTime;
           if (target && !this.lastActionResult.outOfRange && !this.lastActionResult.cooldownBlocked) {
-            this.lastActionResult.validAttackAttempt = true;
             const healthBeforeAttack = this.lastKnownTargetHealth;
             await this.bot.lookAt(
               target.position.offset(0, target.height * 0.65, 0),
@@ -541,20 +554,35 @@ class StageTwoArena {
             // Give the server one tick to process the forced rotation before
             // sending the interact-entity attack packet.
             await sleep(ATTACK_AIM_SETTLE_MS);
-            this.pendingAttackUntil = Date.now() + 1_000;
-            this.bot.attack(target);
-            this.nextAttackTime =
-              this.elapsedSeconds + IRON_SWORD_COOLDOWN_SECONDS;
-            await this.waitForAttackResult(healthBeforeAttack);
-            const serverHealth = await this.queryTargetHealthFromServer();
-            if (serverHealth !== null) {
-              this.lastActionResult.serverHealthVerified = true;
-              this.lastKnownTargetHealth = serverHealth;
-              if (serverHealth < healthBeforeAttack)
-                this.lastActionResult.attackLanded = true;
-              if (serverHealth <= 0) {
-                this.targetConfirmedDead = true;
-                this.lastActionResult.confirmedKill = true;
+
+            // Looking takes time and the entity reference can change. Re-check
+            // actual reach immediately before the attack packet is sent.
+            target = this.getTargetEntity();
+            distance = target
+              ? this.attackDistanceTo(target)
+              : this.horizontalDistanceToWorldTarget();
+            this.lastActionResult.attackDistance = distance;
+            this.lastActionResult.outOfRange =
+              !target || distance > ATTACK_RANGE;
+
+            if (target && !this.lastActionResult.outOfRange) {
+              this.lastActionResult.validAttackAttempt = true;
+              this.lastActionResult.attackPacketSent = true;
+              this.pendingAttackUntil = Date.now() + 1_000;
+              this.bot.attack(target);
+              this.nextAttackTime =
+                this.elapsedSeconds + IRON_SWORD_COOLDOWN_SECONDS;
+              await this.waitForAttackResult(healthBeforeAttack);
+              const serverHealth = await this.queryTargetHealthFromServer();
+              if (serverHealth !== null) {
+                this.lastActionResult.serverHealthVerified = true;
+                this.lastKnownTargetHealth = serverHealth;
+                if (serverHealth < healthBeforeAttack)
+                  this.lastActionResult.attackLanded = true;
+                if (serverHealth <= 0) {
+                  this.targetConfirmedDead = true;
+                  this.lastActionResult.confirmedKill = true;
+                }
               }
             }
           }
@@ -640,6 +668,27 @@ class StageTwoArena {
     const eye = this.bot.entity.position.offset(0, 1.62, 0);
     const targetCenter = target.position.offset(0, target.height * 0.5, 0);
     return eye.distanceTo(targetCenter);
+  }
+
+  private async waitForMovementToSettle(): Promise<boolean> {
+    this.bot.clearControlStates();
+    const deadline = Date.now() + MOVEMENT_SETTLE_TIMEOUT_MS;
+    let settledSamples = 0;
+
+    while (Date.now() < deadline) {
+      const horizontalSpeed = Math.hypot(
+        this.bot.entity.velocity.x,
+        this.bot.entity.velocity.z
+      );
+      if (horizontalSpeed <= SETTLED_HORIZONTAL_SPEED) {
+        settledSamples += 1;
+        if (settledSamples >= 2) return true;
+      } else {
+        settledSamples = 0;
+      }
+      await sleep(25);
+    }
+    return false;
   }
 
   private async ensureHealthObjective(): Promise<void> {
@@ -778,7 +827,9 @@ function createEmptyAttackResult() {
     attackLanded: false,
     confirmedKill: false,
     attackDistance: null as number | null,
-    serverHealthVerified: false
+    serverHealthVerified: false,
+    movementSettled: false,
+    attackPacketSent: false
   };
 }
 
