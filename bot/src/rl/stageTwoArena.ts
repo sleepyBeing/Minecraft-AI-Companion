@@ -9,6 +9,7 @@ import {
   MOVEMENT_SETTLE_TIMEOUT_MS,
   ROOM_SIZE,
   SETTLED_HORIZONTAL_SPEED,
+  TARGET_REACQUIRE_TIMEOUT_MS,
   TURN_RADIANS,
   distanceBetween,
   parseCoordinate,
@@ -157,48 +158,60 @@ export class StageTwoArena {
           break;
         case 7: {
           this.lastActionResult.attackSelected = true;
-          let target = this.getTargetEntity();
-          let distance = target
-            ? this.attackDistanceTo(target)
-            : this.horizontalDistanceToWorldTarget();
+          let target = await this.waitForTargetEntity();
+          if (!target) {
+            this.lastActionResult.targetMissing = true;
+            break;
+          }
+
+          let distance = this.attackDistanceTo(target);
           this.lastActionResult.attackDistance = distance;
-          this.lastActionResult.outOfRange =
-            !target || distance > ATTACK_RANGE;
+          this.lastActionResult.outOfRange = distance > ATTACK_RANGE;
           if (this.lastActionResult.outOfRange) break;
+
           this.bot.clearControlStates();
           const movementSettled =
             distance <= CLOSE_ATTACK_RANGE
               ? true
               : await this.waitForMovementToSettle();
           this.lastActionResult.movementSettled = movementSettled;
-          target = this.getTargetEntity();
-          distance = target
-            ? this.attackDistanceTo(target)
-            : this.horizontalDistanceToWorldTarget();
+          target = await this.waitForTargetEntity();
+          if (!target) {
+            this.lastActionResult.targetMissing = true;
+            break;
+          }
+
+          distance = this.attackDistanceTo(target);
           this.lastActionResult.attackDistance = distance;
-          this.lastActionResult.outOfRange =
-            !target ||
-            distance > ATTACK_RANGE ||
-            (distance > CLOSE_ATTACK_RANGE && !movementSettled);
+          this.lastActionResult.outOfRange = distance > ATTACK_RANGE;
+          this.lastActionResult.movementNotSettled =
+            distance > CLOSE_ATTACK_RANGE && !movementSettled;
           this.lastActionResult.cooldownBlocked =
             !this.lastActionResult.outOfRange &&
+            !this.lastActionResult.movementNotSettled &&
             this.elapsedSeconds < this.nextAttackTime;
-          if (target && !this.lastActionResult.outOfRange && !this.lastActionResult.cooldownBlocked) {
+          if (
+            !this.lastActionResult.outOfRange &&
+            !this.lastActionResult.movementNotSettled &&
+            !this.lastActionResult.cooldownBlocked
+          ) {
             const healthBeforeAttack = this.lastKnownTargetHealth;
             await this.bot.lookAt(
               target.position.offset(0, target.height * 0.65, 0),
               true
             );
             await sleep(ATTACK_AIM_SETTLE_MS);
-            target = this.getTargetEntity();
-            distance = target
-              ? this.attackDistanceTo(target)
-              : this.horizontalDistanceToWorldTarget();
-            this.lastActionResult.attackDistance = distance;
-            this.lastActionResult.outOfRange =
-              !target || distance > ATTACK_RANGE;
+            target = await this.waitForTargetEntity();
+            if (!target) {
+              this.lastActionResult.targetMissing = true;
+              break;
+            }
 
-            if (target && !this.lastActionResult.outOfRange) {
+            distance = this.attackDistanceTo(target);
+            this.lastActionResult.attackDistance = distance;
+            this.lastActionResult.outOfRange = distance > ATTACK_RANGE;
+
+            if (!this.lastActionResult.outOfRange) {
               this.lastActionResult.validAttackAttempt = true;
               this.lastActionResult.attackPacketSent = true;
               this.pendingAttackUntil = Date.now() + 1_000;
@@ -222,6 +235,19 @@ export class StageTwoArena {
           break;
         }
       }
+
+      // Tracking can disappear during any action, not only ATTACK. Give
+      // Mineflayer the same short reacquisition window so the Python
+      // environment can truncate immediately instead of collecting an
+      // unusable episode until the policy happens to attack again.
+      if (
+        !this.targetConfirmedDead &&
+        !this.lastActionResult.targetMissing &&
+        !this.getTargetEntity() &&
+        !(await this.waitForTargetEntity())
+      ) {
+        this.lastActionResult.targetMissing = true;
+      }
       await sleep(ACTION_DURATION_MS);
     } finally {
       this.bot.clearControlStates();
@@ -243,16 +269,25 @@ export class StageTwoArena {
       );
 
     const targetAlive = !this.targetConfirmedDead;
+    const observedTargetPosition: [number, number] = target
+      ? [
+          target.position.x - this.origin.x,
+          target.position.z - this.origin.z
+        ]
+      : [...this.targetPosition];
+    const distance = target
+      ? this.horizontalDistanceTo(target.position.x, target.position.z)
+      : this.horizontalDistanceToWorldTarget();
     return {
       botPosition: [botX, botZ],
-      targetPosition: [...this.targetPosition],
+      targetPosition: observedTargetPosition,
       yaw: this.bot.entity.yaw,
       health: this.bot.health,
       hasIronSword: this.bot.heldItem?.name === "iron_sword",
       targetHealth: this.lastKnownTargetHealth,
       targetAlive,
       targetVisible: target !== null,
-      distance: this.horizontalDistanceToWorldTarget(),
+      distance,
       attackReady: this.elapsedSeconds >= this.nextAttackTime,
       attackResult: { ...this.lastActionResult },
       elapsedSeconds: this.elapsedSeconds,
@@ -260,7 +295,7 @@ export class StageTwoArena {
     };
   }
 
-  private getTargetEntity() {
+  private getTargetEntity(): Entity | null {
     if (this.targetConfirmedDead || !this.origin) return null;
     if (this.targetEntityId !== null) {
       const entity = this.bot.entities[this.targetEntityId];
@@ -268,15 +303,44 @@ export class StageTwoArena {
     }
 
     const expected = this.worldPosition(this.targetPosition);
-    const reacquired = Object.values(this.bot.entities).find((entity) =>
-      entity.name === "zombie" &&
-      Math.hypot(entity.position.x - expected.x, entity.position.z - expected.z) <= 2
-    );
+    const reacquired = Object.values(this.bot.entities)
+      .filter(
+        (entity): entity is Entity =>
+          entity.name === "zombie" && this.isInsideArena(entity)
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.position.x - expected.x, a.position.z - expected.z) -
+          Math.hypot(b.position.x - expected.x, b.position.z - expected.z)
+      )[0];
     if (reacquired) {
       this.targetEntityId = reacquired.id;
       return reacquired;
     }
     return null;
+  }
+
+  private async waitForTargetEntity(): Promise<Entity | null> {
+    const deadline = Date.now() + TARGET_REACQUIRE_TIMEOUT_MS;
+    do {
+      const target = this.getTargetEntity();
+      if (target) return target;
+      await sleep(25);
+    } while (Date.now() < deadline);
+    return null;
+  }
+
+  private isInsideArena(entity: Entity): boolean {
+    if (!this.origin) return false;
+    const { x, y, z } = this.origin;
+    return (
+      entity.position.x >= x &&
+      entity.position.x <= x + ROOM_SIZE &&
+      entity.position.y >= y &&
+      entity.position.y <= y + 4 &&
+      entity.position.z >= z &&
+      entity.position.z <= z + ROOM_SIZE
+    );
   }
 
   private async waitForAttackResult(healthBeforeAttack: number): Promise<void> {
@@ -443,6 +507,8 @@ function createEmptyAttackResult() {
     attackDistance: null as number | null,
     serverHealthVerified: false,
     movementSettled: false,
+    movementNotSettled: false,
+    targetMissing: false,
     attackPacketSent: false
   };
 }

@@ -209,6 +209,9 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
                 ),
                 "server_health_verified": False,
                 "movement_settled": True,
+                "movement_not_settled": False,
+                "target_missing": False,
+                "tracking_failure": False,
                 "attack_packet_sent": valid_attack_attempt,
                 "success": terminated,
                 "source": "simulation",
@@ -380,20 +383,33 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
         if entered_attack_range:
             self.attack_range_bonus_awarded = True
 
-        invalid_attack = bool(attack_result["outOfRange"])
+        out_of_range = bool(attack_result["outOfRange"])
+        target_missing = bool(attack_result.get("targetMissing", False))
+        movement_not_settled = bool(
+            attack_result.get("movementNotSettled", False)
+        )
+        tracking_failure = target_missing and self.target_alive
         reward = (
             damage_dealt * self.DAMAGE_REWARD_SCALE
             + approach_reward
             + (self.ATTACK_RANGE_ENTRY_REWARD if entered_attack_range else 0.0)
             - self.TIME_PENALTY
         )
-        if invalid_attack:
+        if out_of_range:
             reward -= self.OUT_OF_RANGE_ATTACK_PENALTY
+        if tracking_failure:
+            # A missing Mineflayer entity is an environment failure, not a
+            # policy mistake. End the episode without rewarding or penalizing
+            # the selected action.
+            reward = 0.0
 
         terminated = not self.target_alive
         if terminated:
             reward += self.DEFEAT_REWARD
-        truncated = self.elapsed_seconds >= self.EPISODE_SECONDS and not terminated
+        truncated = (
+            tracking_failure
+            or self.elapsed_seconds >= self.EPISODE_SECONDS
+        ) and not terminated
         info = self._get_info()
         info.update(
             {
@@ -405,7 +421,10 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
                 "valid_attack_attempt": bool(
                     attack_result["validAttackAttempt"]
                 ),
-                "invalid_attack": invalid_attack,
+                "invalid_attack": out_of_range,
+                "target_missing": target_missing,
+                "tracking_failure": tracking_failure,
+                "movement_not_settled": movement_not_settled,
                 "cooldown_blocked": bool(attack_result["cooldownBlocked"]),
                 "attack_landed": bool(attack_result["attackLanded"]),
                 "confirmed_kill": bool(attack_result["confirmedKill"]),

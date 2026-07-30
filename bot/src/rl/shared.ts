@@ -30,6 +30,7 @@ export const IRON_SWORD_COOLDOWN_SECONDS = 0.625;
 export const ATTACK_AIM_SETTLE_MS = 75;
 export const MOVEMENT_SETTLE_TIMEOUT_MS = 450;
 export const SETTLED_HORIZONTAL_SPEED = 0.025;
+export const TARGET_REACQUIRE_TIMEOUT_MS = 250;
 
 export function validatePosition(
   position: [number, number],

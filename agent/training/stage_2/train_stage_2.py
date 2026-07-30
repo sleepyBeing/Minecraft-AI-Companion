@@ -407,6 +407,12 @@ def _write_rollout_summaries(
         for name, value in {
             "combat/mean_damage_per_step": np.mean(rollout["damage_dealt"]),
             "combat/out_of_range_attacks": np.sum(rollout["invalid_attacks"]),
+            "combat/target_tracking_failures": np.sum(
+                rollout["target_tracking_failures"]
+            ),
+            "combat/movement_settle_failures": np.sum(
+                rollout["movement_settle_failures"]
+            ),
             "combat/attack_selections": np.sum(rollout["attack_selections"]),
             "combat/valid_attack_attempts": np.sum(
                 rollout["valid_attack_attempts"]
@@ -437,6 +443,8 @@ def _print_rollout(
         f"valid={int(np.sum(rollout['valid_attack_attempts']))} "
         f"hits={int(np.sum(rollout['confirmed_hits']))} "
         f"invalid_attacks={int(np.sum(rollout['invalid_attacks']))} "
+        f"tracking_failures={int(np.sum(rollout['target_tracking_failures']))} "
+        f"settle_failures={int(np.sum(rollout['movement_settle_failures']))} "
         f"policy_loss={metrics['policy_loss']:.4f} "
         f"value_loss={metrics['value_loss']:.4f}"
     )

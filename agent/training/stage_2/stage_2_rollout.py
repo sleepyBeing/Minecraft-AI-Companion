@@ -19,6 +19,8 @@ class StageTwoEpisodeState:
         self.attack_selections = 0
         self.valid_attack_attempts = 0
         self.invalid_attacks = 0
+        self.target_tracking_failures = 0
+        self.movement_settle_failures = 0
         self.cooldown_blocked_attacks = 0
         self.confirmed_hits = 0
         self.range_entries = 0
@@ -30,6 +32,8 @@ class StageTwoEpisodeState:
         self.attack_selections = 0
         self.valid_attack_attempts = 0
         self.invalid_attacks = 0
+        self.target_tracking_failures = 0
+        self.movement_settle_failures = 0
         self.cooldown_blocked_attacks = 0
         self.confirmed_hits = 0
         self.range_entries = 0
@@ -63,6 +67,8 @@ def collect_stage_two_rollout(
         "attack_selections": [],
         "valid_attack_attempts": [],
         "invalid_attacks": [],
+        "target_tracking_failures": [],
+        "movement_settle_failures": [],
         "cooldown_blocked_attacks": [],
         "confirmed_hits": [],
     }
@@ -96,6 +102,8 @@ def collect_stage_two_rollout(
         attack_selected = bool(info["attack_selected"])
         valid_attack_attempt = bool(info["valid_attack_attempt"])
         invalid_attack = bool(info["invalid_attack"])
+        tracking_failure = bool(info["tracking_failure"])
+        movement_not_settled = bool(info["movement_not_settled"])
         cooldown_blocked = bool(info["cooldown_blocked"])
         confirmed_hit = damage > 0
         entered_attack_range = bool(info["entered_attack_range"])
@@ -114,6 +122,8 @@ def collect_stage_two_rollout(
             "attack_selections": float(attack_selected),
             "valid_attack_attempts": float(valid_attack_attempt),
             "invalid_attacks": float(invalid_attack),
+            "target_tracking_failures": float(tracking_failure),
+            "movement_settle_failures": float(movement_not_settled),
             "cooldown_blocked_attacks": float(cooldown_blocked),
             "confirmed_hits": float(confirmed_hit),
         }.items():
@@ -125,6 +135,8 @@ def collect_stage_two_rollout(
         episode_state.attack_selections += int(attack_selected)
         episode_state.valid_attack_attempts += int(valid_attack_attempt)
         episode_state.invalid_attacks += int(invalid_attack)
+        episode_state.target_tracking_failures += int(tracking_failure)
+        episode_state.movement_settle_failures += int(movement_not_settled)
         episode_state.cooldown_blocked_attacks += int(cooldown_blocked)
         episode_state.confirmed_hits += int(confirmed_hit)
         episode_state.range_entries += int(entered_attack_range)
@@ -194,6 +206,12 @@ def collect_stage_two_rollout(
         "invalid_attacks": np.asarray(
             buffers["invalid_attacks"], dtype=np.float32
         ),
+        "target_tracking_failures": np.asarray(
+            buffers["target_tracking_failures"], dtype=np.float32
+        ),
+        "movement_settle_failures": np.asarray(
+            buffers["movement_settle_failures"], dtype=np.float32
+        ),
         "cooldown_blocked_attacks": np.asarray(
             buffers["cooldown_blocked_attacks"], dtype=np.float32
         ),
@@ -226,6 +244,8 @@ def _finish_episode(
         attack_selections=episode_state.attack_selections,
         valid_attack_attempts=episode_state.valid_attack_attempts,
         invalid_attacks=episode_state.invalid_attacks,
+        target_tracking_failures=episode_state.target_tracking_failures,
+        movement_settle_failures=episode_state.movement_settle_failures,
         cooldown_blocked_attacks=episode_state.cooldown_blocked_attacks,
         confirmed_hits=episode_state.confirmed_hits,
         range_entries=episode_state.range_entries,
@@ -237,6 +257,8 @@ def _finish_episode(
             "success": float(success),
             "damage_dealt": episode_state.damage_dealt,
             "invalid_attacks": episode_state.invalid_attacks,
+            "target_tracking_failures": episode_state.target_tracking_failures,
+            "movement_settle_failures": episode_state.movement_settle_failures,
             "attack_selections": episode_state.attack_selections,
             "valid_attack_attempts": episode_state.valid_attack_attempts,
             "confirmed_hits": episode_state.confirmed_hits,
@@ -264,6 +286,8 @@ class StageTwoEpisodeCsvLogger:
                 "attack_selections",
                 "valid_attack_attempts",
                 "invalid_attacks",
+                "target_tracking_failures",
+                "movement_settle_failures",
                 "cooldown_blocked_attacks",
                 "confirmed_hits",
                 "range_entries",
@@ -283,6 +307,8 @@ class StageTwoEpisodeCsvLogger:
         attack_selections: int,
         valid_attack_attempts: int,
         invalid_attacks: int,
+        target_tracking_failures: int,
+        movement_settle_failures: int,
         cooldown_blocked_attacks: int,
         confirmed_hits: int,
         range_entries: int,
@@ -299,6 +325,8 @@ class StageTwoEpisodeCsvLogger:
                 attack_selections,
                 valid_attack_attempts,
                 invalid_attacks,
+                target_tracking_failures,
+                movement_settle_failures,
                 cooldown_blocked_attacks,
                 confirmed_hits,
                 range_entries,
