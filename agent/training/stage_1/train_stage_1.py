@@ -16,7 +16,7 @@ from agent.environment import BasicPositioningEnv
 from agent.stages.stage_1_positioning import LiveBasicPositioningEnv
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_TIMESTEPS = 100_000
 
 

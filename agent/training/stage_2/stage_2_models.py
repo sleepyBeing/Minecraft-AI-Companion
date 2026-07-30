@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.training.train_stage_1 import build_actor_critic
+from agent.training.stage_1.train_stage_1 import build_actor_critic
 
 
 def build_stage_two_actor(

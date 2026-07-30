@@ -13,20 +13,20 @@ from agent.stages.stage_2_stationary_combat import (
     LiveStageTwoStationaryCombatEnv,
     StageTwoStationaryCombatEnv,
 )
-from agent.training.stage_2_models import (
+from agent.training.stage_2.stage_2_models import (
     build_stage_two_actor,
     build_stage_two_critic,
     transfer_legacy_stage_two_actor,
     transfer_stage_one_actor,
 )
-from agent.training.stage_2_ppo import update_stage_two_ppo
-from agent.training.stage_2_preflight import run_live_combat_preflight
-from agent.training.stage_2_rollout import (
+from agent.training.stage_2.stage_2_ppo import update_stage_two_ppo
+from agent.training.stage_2.stage_2_preflight import run_live_combat_preflight
+from agent.training.stage_2.stage_2_rollout import (
     StageTwoEpisodeCsvLogger,
     StageTwoEpisodeState,
     collect_stage_two_rollout,
 )
-from agent.training.train_stage_1 import (
+from agent.training.stage_1.train_stage_1 import (
     import_tensorflow,
     positive_float,
     positive_integer,
@@ -36,7 +36,7 @@ from agent.training.train_stage_1 import (
 )
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_TIMESTEPS = 150_000
 
 
