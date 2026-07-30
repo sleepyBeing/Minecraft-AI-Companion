@@ -24,7 +24,6 @@ from agent.training.train_stage_1 import (
     positive_integer,
     resolve_checkpoint,
     unit_interval,
-    update_ppo,
     write_training_summaries,
 )
 
@@ -46,12 +45,32 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=positive_integer, default=64)
     parser.add_argument("--epochs", type=positive_integer, default=10)
     parser.add_argument("--learning-rate", type=positive_float, default=3e-4)
+    parser.add_argument("--critic-epochs", type=positive_integer, default=10)
+    parser.add_argument("--critic-learning-rate", type=positive_float, default=3e-4)
+    parser.add_argument("--critic-hidden-size", type=positive_integer, default=128)
+    parser.add_argument(
+        "--critic-loss",
+        choices=("huber", "mse"),
+        default="huber",
+        help="Stage-two critic loss; independent of Stage One.",
+    )
+    parser.add_argument(
+        "--critic-huber-delta",
+        type=positive_float,
+        default=10.0,
+        help="Huber transition point, used only with --critic-loss huber.",
+    )
     parser.add_argument("--gamma", type=unit_interval, default=0.99)
     parser.add_argument("--gae-lambda", type=unit_interval, default=0.95)
     parser.add_argument("--clip-ratio", type=positive_float, default=0.2)
     parser.add_argument("--entropy-coefficient", type=float, default=0.05)
-    parser.add_argument("--value-coefficient", type=positive_float, default=0.5)
+    parser.add_argument("--value-coefficient", type=positive_float, default=1.0)
     parser.add_argument("--max-gradient-norm", type=positive_float, default=0.5)
+    parser.add_argument(
+        "--critic-max-gradient-norm",
+        type=positive_float,
+        default=1.0,
+    )
     parser.add_argument("--hidden-size", type=positive_integer, default=128)
     parser.add_argument("--checkpoint-freq", type=positive_integer, default=10_000)
     parser.add_argument(
@@ -68,6 +87,14 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--legacy-stage2-actor-checkpoint",
+        type=Path,
+        help=(
+            "Initialize only the actor from an older combined Stage Two "
+            "checkpoint; the new independent critic starts fresh."
+        ),
+    )
+    parser.add_argument(
         "--stage1-hidden-size",
         type=positive_integer,
         default=128,
@@ -77,12 +104,63 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def build_stage_two_actor(
+    tf: Any,
+    *,
+    observation_size: int,
+    action_count: int,
+    hidden_size: int,
+) -> Any:
+    inputs = tf.keras.Input(
+        shape=(observation_size,),
+        dtype=tf.float32,
+        name="actor_observation",
+    )
+    hidden = tf.keras.layers.Dense(
+        hidden_size, activation="tanh", name="actor_hidden_1"
+    )(inputs)
+    hidden = tf.keras.layers.Dense(
+        hidden_size, activation="tanh", name="actor_hidden_2"
+    )(hidden)
+    logits = tf.keras.layers.Dense(action_count, name="policy_logits")(hidden)
+    return tf.keras.Model(inputs=inputs, outputs=logits, name="stage_two_actor")
+
+
+def build_stage_two_critic(
+    tf: Any,
+    *,
+    observation_size: int,
+    hidden_size: int,
+) -> Any:
+    inputs = tf.keras.Input(
+        shape=(observation_size,),
+        dtype=tf.float32,
+        name="critic_observation",
+    )
+    hidden = tf.keras.layers.Dense(
+        hidden_size, activation="tanh", name="critic_hidden_1"
+    )(inputs)
+    hidden = tf.keras.layers.Dense(
+        hidden_size, activation="tanh", name="critic_hidden_2"
+    )(hidden)
+    value = tf.keras.layers.Dense(1, name="critic_value")(hidden)
+    return tf.keras.Model(inputs=inputs, outputs=value, name="stage_two_critic")
+
+
 def main() -> None:
     args = parse_arguments()
     if args.batch_size > args.rollout_steps:
         raise ValueError("--batch-size cannot exceed --rollout-steps")
-    if args.resume and args.stage1_checkpoint:
-        raise ValueError("--resume and --stage1-checkpoint cannot be used together")
+    initialization_sources = (
+        bool(args.resume),
+        bool(args.stage1_checkpoint),
+        bool(args.legacy_stage2_actor_checkpoint),
+    )
+    if sum(initialization_sources) > 1:
+        raise ValueError(
+            "--resume, --stage1-checkpoint, and "
+            "--legacy-stage2-actor-checkpoint are mutually exclusive"
+        )
     if args.stage1_checkpoint and args.stage1_hidden_size != args.hidden_size:
         raise ValueError(
             "Stage-one transfer requires matching --stage1-hidden-size and --hidden-size"
@@ -120,18 +198,28 @@ def main() -> None:
 
     observation_size = int(observation_shape[0])
     action_count = int(environment.action_space.n)
-    model = build_actor_critic(
+    actor = build_stage_two_actor(
         tf,
         observation_size=observation_size,
         action_count=action_count,
         hidden_size=args.hidden_size,
     )
-    optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate)
+    critic = build_stage_two_critic(
+        tf,
+        observation_size=observation_size,
+        hidden_size=args.critic_hidden_size,
+    )
+    actor_optimizer = tf.keras.optimizers.Adam(learning_rate=args.learning_rate)
+    critic_optimizer = tf.keras.optimizers.Adam(
+        learning_rate=args.critic_learning_rate
+    )
     global_step = tf.Variable(0, trainable=False, dtype=tf.int64, name="global_step")
     checkpoint = tf.train.Checkpoint(
         step=global_step,
-        optimizer=optimizer,
-        model=model,
+        actor_optimizer=actor_optimizer,
+        critic_optimizer=critic_optimizer,
+        actor=actor,
+        critic=critic,
     )
     checkpoint_manager = tf.train.CheckpointManager(
         checkpoint,
@@ -141,22 +229,53 @@ def main() -> None:
 
     if args.resume:
         restored_path = resolve_checkpoint(tf, args.resume)
+        checkpoint_names = {
+            name for name, _ in tf.train.list_variables(restored_path)
+        }
+        if not (
+            any(name.startswith("actor_optimizer/") for name in checkpoint_names)
+            and any(name.startswith("critic_optimizer/") for name in checkpoint_names)
+        ):
+            raise ValueError(
+                "--resume requires a checkpoint created by the separate "
+                "Stage Two actor/critic trainer. Use "
+                "--legacy-stage2-actor-checkpoint for older combined models."
+            )
         checkpoint.restore(restored_path).expect_partial()
         print(f"Restored stage-two checkpoint: {restored_path}")
     elif args.stage1_checkpoint:
         source_path = resolve_checkpoint(tf, args.stage1_checkpoint)
         transfer_stage_one_weights(
             tf=tf,
-            stage_two_model=model,
+            stage_two_actor=actor,
             checkpoint_path=source_path,
             hidden_size=args.stage1_hidden_size,
         )
-        print(f"Initialized compatible layers from stage one: {source_path}")
+        print(f"Initialized Stage Two actor from Stage One: {source_path}")
+    elif args.legacy_stage2_actor_checkpoint:
+        source_path = resolve_checkpoint(tf, args.legacy_stage2_actor_checkpoint)
+        transfer_legacy_stage_two_actor(
+            tf=tf,
+            stage_two_actor=actor,
+            checkpoint_path=source_path,
+            hidden_size=args.hidden_size,
+            observation_size=observation_size,
+            action_count=action_count,
+        )
+        print(
+            "Initialized actor from legacy Stage Two checkpoint; "
+            f"critic started fresh: {source_path}"
+        )
 
     configuration = vars(args).copy()
     configuration["resume"] = str(args.resume) if args.resume else None
     configuration["stage1_checkpoint"] = (
         str(args.stage1_checkpoint) if args.stage1_checkpoint else None
+    )
+    configuration["legacy_stage2_actor_checkpoint"] = (
+        str(args.legacy_stage2_actor_checkpoint)
+        if args.legacy_stage2_actor_checkpoint
+        else None
     )
     configuration.update(
         {
@@ -167,6 +286,7 @@ def main() -> None:
             "framework": "TensorFlow",
             "observation_size": observation_size,
             "action_count": action_count,
+            "architecture": "separate_actor_and_critic",
         }
     )
     (model_directory / "training_config.json").write_text(
@@ -197,7 +317,8 @@ def main() -> None:
             rollout_size = min(args.rollout_steps, remaining)
             rollout, observation, episode_state = collect_stage_two_rollout(
                 tf=tf,
-                model=model,
+                actor=actor,
+                critic=critic,
                 environment=environment,
                 initial_observation=observation,
                 rollout_size=rollout_size,
@@ -207,17 +328,23 @@ def main() -> None:
                 episode_logger=episode_log,
                 summary_writer=summary_writer,
             )
-            metrics = update_ppo(
+            metrics = update_stage_two_ppo(
                 tf=tf,
-                model=model,
-                optimizer=optimizer,
+                actor=actor,
+                critic=critic,
+                actor_optimizer=actor_optimizer,
+                critic_optimizer=critic_optimizer,
                 rollout=rollout,
-                epochs=args.epochs,
+                actor_epochs=args.epochs,
+                critic_epochs=args.critic_epochs,
                 batch_size=args.batch_size,
                 clip_ratio=args.clip_ratio,
                 entropy_coefficient=args.entropy_coefficient,
                 value_coefficient=args.value_coefficient,
-                max_gradient_norm=args.max_gradient_norm,
+                actor_max_gradient_norm=args.max_gradient_norm,
+                critic_max_gradient_norm=args.critic_max_gradient_norm,
+                critic_loss_name=args.critic_loss,
+                critic_huber_delta=args.critic_huber_delta,
             )
             global_step.assign_add(rollout_size)
             step = int(global_step.numpy())
@@ -285,7 +412,8 @@ def main() -> None:
         raise
     else:
         saved_path = checkpoint_manager.save(checkpoint_number=int(global_step.numpy()))
-        model.save_weights(model_directory / "final_model.weights.h5")
+        actor.save_weights(model_directory / "final_actor.weights.h5")
+        critic.save_weights(model_directory / "final_critic.weights.h5")
         print(f"Training complete; checkpoint saved: {saved_path}")
     finally:
         episode_log.close()
@@ -311,7 +439,8 @@ class StageTwoEpisodeState:
 def collect_stage_two_rollout(
     *,
     tf: Any,
-    model: Any,
+    actor: Any,
+    critic: Any,
     environment: StageTwoStationaryCombatEnv,
     initial_observation: np.ndarray,
     rollout_size: int,
@@ -340,16 +469,17 @@ def collect_stage_two_rollout(
 
     for _ in range(rollout_size):
         observation_tensor = tf.convert_to_tensor(observation[None, :], dtype=tf.float32)
-        logits, value_tensor = model(observation_tensor, training=False)
+        logits = actor(observation_tensor, training=False)
+        value_tensor = critic(observation_tensor, training=False)
         action = int(tf.random.categorical(logits, 1)[0, 0].numpy())
         log_probability = float(tf.nn.log_softmax(logits)[0, action].numpy())
         value = float(value_tensor[0, 0].numpy())
 
         next_observation, reward, terminated, truncated, info = environment.step(action)
-        next_value_tensor = model(
+        next_value_tensor = critic(
             tf.convert_to_tensor(next_observation[None, :], dtype=tf.float32),
             training=False,
-        )[1]
+        )
         next_value = float(next_value_tensor[0, 0].numpy())
         episode_done = terminated or truncated
         damage = float(info["damage_dealt"])
@@ -499,6 +629,167 @@ def collect_stage_two_rollout(
     return rollout, observation, episode_state
 
 
+def update_stage_two_ppo(
+    *,
+    tf: Any,
+    actor: Any,
+    critic: Any,
+    actor_optimizer: Any,
+    critic_optimizer: Any,
+    rollout: dict[str, np.ndarray],
+    actor_epochs: int,
+    critic_epochs: int,
+    batch_size: int,
+    clip_ratio: float,
+    entropy_coefficient: float,
+    value_coefficient: float,
+    actor_max_gradient_norm: float,
+    critic_max_gradient_norm: float,
+    critic_loss_name: str,
+    critic_huber_delta: float,
+) -> dict[str, float]:
+    """Update Stage Two's actor and independent critic with separate settings."""
+
+    sample_count = len(rollout["actions"])
+    actor_metrics: dict[str, list[float]] = {
+        "policy_loss": [],
+        "entropy": [],
+        "approximate_kl": [],
+        "clip_fraction": [],
+        "actor_gradient_norm": [],
+    }
+    critic_losses: list[float] = []
+    critic_gradient_norms: list[float] = []
+
+    for _ in range(actor_epochs):
+        shuffled_indices = np.random.permutation(sample_count)
+        for start in range(0, sample_count, batch_size):
+            indices = shuffled_indices[start : start + batch_size]
+            observations = tf.convert_to_tensor(rollout["observations"][indices])
+            actions = tf.convert_to_tensor(rollout["actions"][indices])
+            old_log_probabilities = tf.convert_to_tensor(
+                rollout["log_probabilities"][indices]
+            )
+            advantages = tf.convert_to_tensor(rollout["advantages"][indices])
+
+            with tf.GradientTape() as tape:
+                logits = actor(observations, training=True)
+                all_log_probabilities = tf.nn.log_softmax(logits)
+                action_indices = tf.stack(
+                    [tf.range(tf.shape(actions)[0]), actions],
+                    axis=1,
+                )
+                new_log_probabilities = tf.gather_nd(
+                    all_log_probabilities, action_indices
+                )
+                ratios = tf.exp(new_log_probabilities - old_log_probabilities)
+                unclipped_objective = ratios * advantages
+                clipped_objective = (
+                    tf.clip_by_value(
+                        ratios,
+                        1.0 - clip_ratio,
+                        1.0 + clip_ratio,
+                    )
+                    * advantages
+                )
+                policy_loss = -tf.reduce_mean(
+                    tf.minimum(unclipped_objective, clipped_objective)
+                )
+                probabilities = tf.nn.softmax(logits)
+                entropy = -tf.reduce_mean(
+                    tf.reduce_sum(
+                        probabilities * all_log_probabilities,
+                        axis=1,
+                    )
+                )
+                actor_loss = policy_loss - entropy_coefficient * entropy
+
+            actor_gradients = tape.gradient(
+                actor_loss,
+                actor.trainable_variables,
+            )
+            actor_gradients, actor_gradient_norm = tf.clip_by_global_norm(
+                actor_gradients,
+                actor_max_gradient_norm,
+            )
+            actor_optimizer.apply_gradients(
+                zip(actor_gradients, actor.trainable_variables)
+            )
+
+            approximate_kl = tf.reduce_mean(
+                old_log_probabilities - new_log_probabilities
+            )
+            clip_fraction = tf.reduce_mean(
+                tf.cast(
+                    tf.abs(ratios - 1.0) > clip_ratio,
+                    tf.float32,
+                )
+            )
+            for name, value in {
+                "policy_loss": policy_loss,
+                "entropy": entropy,
+                "approximate_kl": approximate_kl,
+                "clip_fraction": clip_fraction,
+                "actor_gradient_norm": actor_gradient_norm,
+            }.items():
+                actor_metrics[name].append(float(value.numpy()))
+
+    for _ in range(critic_epochs):
+        shuffled_indices = np.random.permutation(sample_count)
+        for start in range(0, sample_count, batch_size):
+            indices = shuffled_indices[start : start + batch_size]
+            observations = tf.convert_to_tensor(rollout["observations"][indices])
+            returns = tf.convert_to_tensor(rollout["returns"][indices])
+
+            with tf.GradientTape() as tape:
+                predicted_values = tf.squeeze(
+                    critic(observations, training=True),
+                    axis=1,
+                )
+                errors = predicted_values - returns
+                if critic_loss_name == "huber":
+                    absolute_errors = tf.abs(errors)
+                    quadratic = tf.minimum(
+                        absolute_errors,
+                        critic_huber_delta,
+                    )
+                    linear = absolute_errors - quadratic
+                    value_loss = tf.reduce_mean(
+                        0.5 * tf.square(quadratic)
+                        + critic_huber_delta * linear
+                    )
+                elif critic_loss_name == "mse":
+                    value_loss = 0.5 * tf.reduce_mean(tf.square(errors))
+                else:
+                    raise ValueError(
+                        f"Unsupported critic loss: {critic_loss_name}"
+                    )
+                critic_objective = value_coefficient * value_loss
+
+            critic_gradients = tape.gradient(
+                critic_objective,
+                critic.trainable_variables,
+            )
+            critic_gradients, critic_gradient_norm = tf.clip_by_global_norm(
+                critic_gradients,
+                critic_max_gradient_norm,
+            )
+            critic_optimizer.apply_gradients(
+                zip(critic_gradients, critic.trainable_variables)
+            )
+            critic_losses.append(float(value_loss.numpy()))
+            critic_gradient_norms.append(float(critic_gradient_norm.numpy()))
+
+    return {
+        **{
+            name: float(np.mean(values))
+            for name, values in actor_metrics.items()
+        },
+        "value_loss": float(np.mean(critic_losses)),
+        "critic_gradient_norm": float(np.mean(critic_gradient_norms)),
+    }
+
+
 class StageTwoEpisodeCsvLogger:
     def __init__(self, path: Path) -> None:
         self._file = path.open("w", newline="", encoding="utf-8")
@@ -564,11 +855,11 @@ class StageTwoEpisodeCsvLogger:
 def transfer_stage_one_weights(
     *,
     tf: Any,
-    stage_two_model: Any,
+    stage_two_actor: Any,
     checkpoint_path: str,
     hidden_size: int,
 ) -> None:
-    """Copy shared stage-one behavior while preserving new stage-two weights."""
+    """Initialize only the Stage Two actor from Stage One positioning."""
 
     stage_one_model = build_actor_critic(
         tf,
@@ -584,23 +875,14 @@ def transfer_stage_one_weights(
     source_hidden_one = stage_one_model.layers[1]
     source_hidden_two = stage_one_model.layers[2]
     source_policy = stage_one_model.layers[3]
-    source_value = stage_one_model.layers[4]
-    target_hidden_one = stage_two_model.layers[1]
-    target_hidden_two = stage_two_model.layers[2]
-    target_policy = stage_two_model.layers[3]
-    target_value = stage_two_model.layers[4]
+    target_hidden_one = stage_two_actor.layers[1]
+    target_hidden_two = stage_two_actor.layers[2]
+    target_policy = stage_two_actor.layers[3]
 
     source_kernel, source_bias = source_hidden_one.get_weights()
     target_kernel, _ = target_hidden_one.get_weights()
-    # Preserve stage-one positioning exactly at transfer time. New stage-two
-    # observation rows must begin as neutral inputs instead of injecting random
-    # offsets into the shared hidden representation.
     target_kernel.fill(0.0)
     target_kernel[: source_kernel.shape[0], :] = source_kernel
-    # Stage one always supplied 0 for "has equipment", so this row never
-    # learned a meaningful response. Stage two supplies 1 for an equipped
-    # sword; zero it to prevent that distribution change from perturbing the
-    # transferred policy. PPO can learn it normally from this neutral start.
     target_kernel[5, :] = 0.0
     target_hidden_one.set_weights([target_kernel, source_bias])
     target_hidden_two.set_weights(source_hidden_two.get_weights())
@@ -611,13 +893,38 @@ def transfer_stage_one_weights(
     target_policy_bias.fill(0.0)
     target_policy_kernel[:, : source_policy_kernel.shape[1]] = source_policy_kernel
     target_policy_bias[: source_policy_bias.shape[0]] = source_policy_bias
-    # The attack action does not exist in stage one. Start it with a controlled
-    # low probability rather than an arbitrary random logit, while retaining
-    # enough probability for PPO exploration.
     target_policy_kernel[:, source_policy_kernel.shape[1]] = 0.0
     target_policy_bias[source_policy_bias.shape[0]] = -1.5
     target_policy.set_weights([target_policy_kernel, target_policy_bias])
-    target_value.set_weights(source_value.get_weights())
+
+
+def transfer_legacy_stage_two_actor(
+    *,
+    tf: Any,
+    stage_two_actor: Any,
+    checkpoint_path: str,
+    hidden_size: int,
+    observation_size: int,
+    action_count: int,
+) -> None:
+    """Copy the actor portion of a pre-separation Stage Two checkpoint."""
+
+    legacy_model = build_actor_critic(
+        tf,
+        observation_size=observation_size,
+        action_count=action_count,
+        hidden_size=hidden_size,
+    )
+    status = tf.train.Checkpoint(model=legacy_model).restore(checkpoint_path)
+    status.expect_partial()
+    status.assert_existing_objects_matched()
+
+    for source_layer, target_layer in zip(
+        legacy_model.layers[1:4],
+        stage_two_actor.layers[1:4],
+        strict=True,
+    ):
+        target_layer.set_weights(source_layer.get_weights())
 
 
 def run_live_combat_preflight(

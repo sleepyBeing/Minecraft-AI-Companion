@@ -56,9 +56,7 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
 
     DAMAGE_REWARD_SCALE = 1.0
     DEFEAT_REWARD = 20.0
-    # Keep the positioning signal learned in stage one while combat behavior is
-    # still sparse. This can be annealed later once reliable hits are learned.
-    APPROACH_REWARD_SCALE = 1.0
+    APPROACH_REWARD_SCALE = 1.0 # from 0.2 back to 1.0 to encourage closing distance more
     ATTACK_RANGE_ENTRY_REWARD = 0.5
     TIME_PENALTY = 0.01
     OUT_OF_RANGE_ATTACK_PENALTY = 0.05
