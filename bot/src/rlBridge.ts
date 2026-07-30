@@ -33,10 +33,8 @@ interface ArenaOrigin {
 const ROOM_SIZE = 15;
 const ACTION_DURATION_MS = 100;
 const TURN_RADIANS = Math.PI * 0.1;
-// Leave a margin below Minecraft's nominal three-block survival reach.  A
-// horizontal centre-to-centre distance of exactly three blocks can still put
-// the target hitbox outside server-validated reach.
 const ATTACK_RANGE = 2.5;
+const CLOSE_ATTACK_RANGE = 2.0;
 const IRON_SWORD_COOLDOWN_SECONDS = 0.625;
 const ATTACK_AIM_SETTLE_MS = 75;
 const MOVEMENT_SETTLE_TIMEOUT_MS = 450;
@@ -533,7 +531,15 @@ class StageTwoArena {
             !target || distance > ATTACK_RANGE;
           if (this.lastActionResult.outOfRange) break;
 
-          const movementSettled = await this.waitForMovementToSettle();
+          // Near the edge of server-validated reach, residual movement can
+          // carry the bot out of range before the attack packet arrives. Close
+          // attacks do not need to wait for a complete stop, but movement
+          // controls must still be cleared before aiming.
+          this.bot.clearControlStates();
+          const movementSettled =
+            distance <= CLOSE_ATTACK_RANGE
+              ? true
+              : await this.waitForMovementToSettle();
           this.lastActionResult.movementSettled = movementSettled;
           target = this.getTargetEntity();
           distance = target
@@ -541,7 +547,9 @@ class StageTwoArena {
             : this.horizontalDistanceToWorldTarget();
           this.lastActionResult.attackDistance = distance;
           this.lastActionResult.outOfRange =
-            !movementSettled || !target || distance > ATTACK_RANGE;
+            !target ||
+            distance > ATTACK_RANGE ||
+            (distance > CLOSE_ATTACK_RANGE && !movementSettled);
           this.lastActionResult.cooldownBlocked =
             !this.lastActionResult.outOfRange &&
             this.elapsedSeconds < this.nextAttackTime;
