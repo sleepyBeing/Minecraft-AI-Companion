@@ -56,6 +56,15 @@ def parse_arguments() -> argparse.Namespace:
     actor.add_argument("--epochs", type=positive_integer, default=10)
     actor.add_argument("--learning-rate", type=positive_float, default=3e-4)
     actor.add_argument("--clip-ratio", type=positive_float, default=0.2)
+    actor.add_argument(
+        "--target-kl",
+        type=positive_float,
+        default=0.03,
+        help=(
+            "Stop the remaining actor epochs when an epoch's mean "
+            "approximate KL exceeds this value."
+        ),
+    )
     actor.add_argument("--entropy-coefficient", type=float, default=0.05)
     actor.add_argument("--max-gradient-norm", type=positive_float, default=0.5)
     actor.add_argument("--hidden-size", type=positive_integer, default=128)
@@ -233,6 +242,7 @@ def main() -> None:
                 critic_epochs=args.critic_epochs,
                 batch_size=args.batch_size,
                 clip_ratio=args.clip_ratio,
+                target_kl=args.target_kl,
                 entropy_coefficient=args.entropy_coefficient,
                 value_coefficient=args.value_coefficient,
                 actor_max_gradient_norm=args.max_gradient_norm,
@@ -445,6 +455,8 @@ def _print_rollout(
         f"invalid_attacks={int(np.sum(rollout['invalid_attacks']))} "
         f"tracking_failures={int(np.sum(rollout['target_tracking_failures']))} "
         f"settle_failures={int(np.sum(rollout['movement_settle_failures']))} "
+        f"actor_epochs={int(metrics['actor_epochs_completed'])} "
+        f"kl_stop={int(metrics['actor_early_stopped'])} "
         f"policy_loss={metrics['policy_loss']:.4f} "
         f"value_loss={metrics['value_loss']:.4f}"
     )

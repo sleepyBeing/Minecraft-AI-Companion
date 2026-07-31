@@ -19,6 +19,7 @@ def update_stage_two_ppo(
     critic_epochs: int,
     batch_size: int,
     clip_ratio: float,
+    target_kl: float,
     entropy_coefficient: float,
     value_coefficient: float,
     actor_max_gradient_norm: float,
@@ -37,8 +38,11 @@ def update_stage_two_ppo(
     }
     critic_losses: list[float] = []
     critic_gradient_norms: list[float] = []
+    actor_epochs_completed = 0
+    actor_early_stopped = False
 
     for _ in range(actor_epochs):
+        epoch_kl_values: list[float] = []
         shuffled_indices = np.random.permutation(sample_count)
         for start in range(0, sample_count, batch_size):
             indices = shuffled_indices[start : start + batch_size]
@@ -106,6 +110,12 @@ def update_stage_two_ppo(
                 "actor_gradient_norm": gradient_norm,
             }.items():
                 actor_metrics[name].append(float(value.numpy()))
+            epoch_kl_values.append(float(approximate_kl.numpy()))
+
+        actor_epochs_completed += 1
+        if float(np.mean(epoch_kl_values)) > target_kl:
+            actor_early_stopped = True
+            break
 
     for _ in range(critic_epochs):
         shuffled_indices = np.random.permutation(sample_count)
@@ -156,4 +166,6 @@ def update_stage_two_ppo(
         },
         "value_loss": float(np.mean(critic_losses)),
         "critic_gradient_norm": float(np.mean(critic_gradient_norms)),
+        "actor_epochs_completed": float(actor_epochs_completed),
+        "actor_early_stopped": float(actor_early_stopped),
     }

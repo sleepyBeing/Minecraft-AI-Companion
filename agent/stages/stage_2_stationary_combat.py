@@ -59,7 +59,7 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
     APPROACH_REWARD_SCALE = 1.0 # from 0.2 back to 1.0 to encourage closing distance more
     ATTACK_RANGE_ENTRY_REWARD = 0.5
     TIME_PENALTY = 0.01
-    OUT_OF_RANGE_ATTACK_PENALTY = 0.05
+    OUT_OF_RANGE_ATTACK_PENALTY = 0.10
     MINIMUM_START_DISTANCE = 5.0
     MAXIMUM_START_DISTANCE = 8.0
 
