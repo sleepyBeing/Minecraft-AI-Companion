@@ -112,7 +112,7 @@ class StageThreeMovingCombatEnv(StageTwoStationaryCombatEnv):
         )
         reward -= damage_taken_penalty
 
-        bot_defeated = self.bot_health <= 0
+        bot_defeated = self.bot_defeated or self.bot_health <= 0
         terminated = terminated or bot_defeated
         truncated = truncated and not terminated
         success = not self.target_alive
@@ -182,7 +182,9 @@ class LiveStageThreeMovingCombatEnv(
         )
         reward -= damage_taken_penalty
 
-        bot_defeated = self.bot_health <= 0
+        # Use the bridge's latched Mineflayer death event. A health-only check
+        # can miss death when the bot respawns before this state is sampled.
+        bot_defeated = self.bot_defeated or self.bot_health <= 0
         terminated = terminated or bot_defeated
         truncated = truncated and not terminated
         success = not self.target_alive

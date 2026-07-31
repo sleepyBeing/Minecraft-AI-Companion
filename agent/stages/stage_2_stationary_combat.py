@@ -86,6 +86,7 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
         self.target_position = np.zeros(2, dtype=np.float32)
         self.bot_yaw = 0.0
         self.bot_health = self.MAX_HEALTH
+        self.bot_defeated = False
         self.has_iron_sword = True
         self.target_health = self.ZOMBIE_MAX_HEALTH
         self.target_alive = True
@@ -122,6 +123,7 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
             float(options.get("bot_yaw", self.np_random.uniform(-np.pi, np.pi)))
         )
         self.bot_health = self.MAX_HEALTH
+        self.bot_defeated = False
         self.has_iron_sword = True
         self.target_health = self.ZOMBIE_MAX_HEALTH
         self.target_alive = True
@@ -459,6 +461,7 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
             self.target_position = target_position
             self.bot_yaw = self._wrap_angle(float(state["yaw"]))
             self.bot_health = float(state["health"])
+            self.bot_defeated = bool(state["botDefeated"])
             self.has_iron_sword = bool(state["hasIronSword"])
             self.target_health = float(state["targetHealth"])
             self.target_alive = bool(state["targetAlive"])

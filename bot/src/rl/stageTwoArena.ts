@@ -39,6 +39,7 @@ export class StageTwoArena {
   private targetEntityId: number | null = null;
   private lastKnownTargetHealth = 20;
   private targetConfirmedDead = false;
+  private botConfirmedDead = false;
   private elapsedSeconds = 0;
   private nextAttackTime = 0;
   private pendingAttackUntil = 0;
@@ -67,6 +68,13 @@ export class StageTwoArena {
       if (Date.now() <= this.pendingAttackUntil)
         this.lastActionResult.attackLanded = true;
     });
+    // Health can already be restored by the time the next WebSocket state is
+    // sampled. Latch the actual Mineflayer death event until reset so the
+    // Gymnasium episode cannot continue across a respawn.
+    bot.on("death", () => {
+      this.botConfirmedDead = true;
+      this.bot.clearControlStates();
+    });
   }
 
   async reset(request: BridgeRequest) {
@@ -91,6 +99,7 @@ export class StageTwoArena {
     this.targetEntityId = null;
     this.lastKnownTargetHealth = 20;
     this.targetConfirmedDead = false;
+    this.botConfirmedDead = false;
     this.elapsedSeconds = 0;
     this.nextAttackTime = 0;
     this.pendingAttackUntil = 0;
@@ -307,6 +316,7 @@ export class StageTwoArena {
       targetPosition: observedTargetPosition,
       yaw: this.bot.entity.yaw,
       health: this.bot.health,
+      botDefeated: this.botConfirmedDead,
       hasIronSword: this.bot.heldItem?.name === "iron_sword",
       targetHealth: this.lastKnownTargetHealth,
       targetAlive,
