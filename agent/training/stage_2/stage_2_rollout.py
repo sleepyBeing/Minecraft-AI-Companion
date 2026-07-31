@@ -16,6 +16,8 @@ class StageTwoEpisodeState:
         self.episode_length = 0
         self.episode_number = 0
         self.damage_dealt = 0.0
+        self.damage_taken = 0.0
+        self.bot_defeats = 0
         self.attack_selections = 0
         self.valid_attack_attempts = 0
         self.invalid_attacks = 0
@@ -29,6 +31,8 @@ class StageTwoEpisodeState:
         self.episode_return = 0.0
         self.episode_length = 0
         self.damage_dealt = 0.0
+        self.damage_taken = 0.0
+        self.bot_defeats = 0
         self.attack_selections = 0
         self.valid_attack_attempts = 0
         self.invalid_attacks = 0
@@ -63,6 +67,8 @@ def collect_stage_two_rollout(
         "terminated_flags": [],
         "episode_done_flags": [],
         "damage_dealt": [],
+        "damage_taken": [],
+        "bot_defeats": [],
         "approach_rewards": [],
         "attack_selections": [],
         "valid_attack_attempts": [],
@@ -98,6 +104,8 @@ def collect_stage_two_rollout(
         )
         episode_done = terminated or truncated
         damage = float(info["damage_dealt"])
+        damage_taken = float(info.get("damage_taken", 0.0))
+        bot_defeated = bool(info.get("bot_defeated", False))
         approach_reward = float(info["approach_reward"])
         attack_selected = bool(info["attack_selected"])
         valid_attack_attempt = bool(info["valid_attack_attempt"])
@@ -118,6 +126,8 @@ def collect_stage_two_rollout(
             "terminated_flags": terminated,
             "episode_done_flags": episode_done,
             "damage_dealt": damage,
+            "damage_taken": damage_taken,
+            "bot_defeats": float(bot_defeated),
             "approach_rewards": approach_reward,
             "attack_selections": float(attack_selected),
             "valid_attack_attempts": float(valid_attack_attempt),
@@ -132,6 +142,8 @@ def collect_stage_two_rollout(
         episode_state.episode_return += reward
         episode_state.episode_length += 1
         episode_state.damage_dealt += damage
+        episode_state.damage_taken += damage_taken
+        episode_state.bot_defeats += int(bot_defeated)
         episode_state.attack_selections += int(attack_selected)
         episode_state.valid_attack_attempts += int(valid_attack_attempt)
         episode_state.invalid_attacks += int(invalid_attack)
@@ -194,6 +206,12 @@ def collect_stage_two_rollout(
         "damage_dealt": np.asarray(
             buffers["damage_dealt"], dtype=np.float32
         ),
+        "damage_taken": np.asarray(
+            buffers["damage_taken"], dtype=np.float32
+        ),
+        "bot_defeats": np.asarray(
+            buffers["bot_defeats"], dtype=np.float32
+        ),
         "approach_rewards": np.asarray(
             buffers["approach_rewards"], dtype=np.float32
         ),
@@ -241,6 +259,8 @@ def _finish_episode(
         final_distance=float(info["distance_to_target"]),
         target_health=float(info["target_health"]),
         damage_dealt=episode_state.damage_dealt,
+        damage_taken=episode_state.damage_taken,
+        bot_defeats=episode_state.bot_defeats,
         attack_selections=episode_state.attack_selections,
         valid_attack_attempts=episode_state.valid_attack_attempts,
         invalid_attacks=episode_state.invalid_attacks,
@@ -256,6 +276,8 @@ def _finish_episode(
             "length": episode_state.episode_length,
             "success": float(success),
             "damage_dealt": episode_state.damage_dealt,
+            "damage_taken": episode_state.damage_taken,
+            "bot_defeats": episode_state.bot_defeats,
             "invalid_attacks": episode_state.invalid_attacks,
             "target_tracking_failures": episode_state.target_tracking_failures,
             "movement_settle_failures": episode_state.movement_settle_failures,
@@ -283,6 +305,8 @@ class StageTwoEpisodeCsvLogger:
                 "final_distance",
                 "target_health",
                 "damage_dealt",
+                "damage_taken",
+                "bot_defeats",
                 "attack_selections",
                 "valid_attack_attempts",
                 "invalid_attacks",
@@ -304,6 +328,8 @@ class StageTwoEpisodeCsvLogger:
         final_distance: float,
         target_health: float,
         damage_dealt: float,
+        damage_taken: float,
+        bot_defeats: int,
         attack_selections: int,
         valid_attack_attempts: int,
         invalid_attacks: int,
@@ -322,6 +348,8 @@ class StageTwoEpisodeCsvLogger:
                 final_distance,
                 target_health,
                 damage_dealt,
+                damage_taken,
+                bot_defeats,
                 attack_selections,
                 valid_attack_attempts,
                 invalid_attacks,
