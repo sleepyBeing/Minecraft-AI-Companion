@@ -18,6 +18,20 @@ import {
 } from "./shared.js";
 import type { ArenaOrigin, BridgeRequest } from "./shared.js";
 
+export interface CombatArenaOptions {
+  stageName: string;
+  targetTag: string;
+  healthObjective: string;
+  stationaryTarget: boolean;
+}
+
+const STAGE_TWO_OPTIONS: CombatArenaOptions = {
+  stageName: "Stage-two",
+  targetTag: "rl_stage2_target",
+  healthObjective: "rl_stage2_health",
+  stationaryTarget: true
+};
+
 export class StageTwoArena {
   private origin: ArenaOrigin | null = null;
   private arenaBuilt = false;
@@ -31,7 +45,10 @@ export class StageTwoArena {
   private healthObjectiveReady = false;
   private lastActionResult = createEmptyAttackResult();
 
-  constructor(private readonly bot: Bot) {
+  constructor(
+    private readonly bot: Bot,
+    private readonly options: CombatArenaOptions = STAGE_TWO_OPTIONS
+  ) {
     bot.on("entityHurt", (entity) => {
       if (!entity || entity.id !== this.targetEntityId) return;
       if (entity.health !== undefined && entity.health !== null)
@@ -53,6 +70,7 @@ export class StageTwoArena {
   }
 
   async reset(request: BridgeRequest) {
+    await this.waitForBotReady();
     const botPosition = validatePosition(request.botPosition ?? [4.5, 7.5], "botPosition");
     const targetPosition = validatePosition(
       request.targetPosition ?? [10.5, 7.5],
@@ -84,20 +102,26 @@ export class StageTwoArena {
     await this.command("effect give @s minecraft:instant_health 1 255 true");
     await this.command("effect give @s minecraft:saturation 999999 0 true");
     await this.command("attribute @s minecraft:scale base set 0.9999999");
-    await this.command("kill @e[type=minecraft:zombie,tag=rl_stage2_target]");
+    await this.command(
+      `kill @e[type=minecraft:zombie,tag=${this.options.targetTag}]`
+    );
     await this.clearArenaEntities();
     await this.command("give @s minecraft:iron_sword 1");
 
     const target = this.worldPosition(targetPosition);
+    const stationaryNbt = this.options.stationaryTarget ? "NoAI:1b," : "";
     await this.command(
       `summon minecraft:zombie ${target.x} ${this.origin.y + 1} ${target.z} ` +
-      `{Tags:["rl_stage2_target"],NoAI:1b,PersistenceRequired:1b,Silent:1b,` +
+      `{Tags:["${this.options.targetTag}"],${stationaryNbt}` +
+      `PersistenceRequired:1b,Silent:1b,` +
       `CanPickUpLoot:0b,IsBaby:0b,Health:20.0f}`
     );
-    await this.command(
-      "attribute @e[type=minecraft:zombie,tag=rl_stage2_target,limit=1] " +
-      "minecraft:knockback_resistance base set 1"
-    );
+    if (this.options.stationaryTarget) {
+      await this.command(
+        `attribute @e[type=minecraft:zombie,tag=${this.options.targetTag},limit=1] ` +
+        "minecraft:knockback_resistance base set 1"
+      );
+    }
 
     const spawn = this.worldPosition(botPosition);
     const yawDegrees = yaw * 180 / Math.PI;
@@ -390,7 +414,9 @@ export class StageTwoArena {
 
   private async ensureHealthObjective(): Promise<void> {
     if (this.healthObjectiveReady) return;
-    await this.command("scoreboard objectives add rl_stage2_health dummy");
+    await this.command(
+      `scoreboard objectives add ${this.options.healthObjective} dummy`
+    );
     this.healthObjectiveReady = true;
   }
 
@@ -403,10 +429,13 @@ export class StageTwoArena {
     if (this.targetConfirmedDead) return 0;
     await this.ensureHealthObjective();
     // A missing entity must not reuse the previous zombie's score.
-    await this.command("scoreboard players set #target rl_stage2_health -1");
     await this.command(
-      "execute store result score #target rl_stage2_health run data get entity " +
-      "@e[type=minecraft:zombie,tag=rl_stage2_target,limit=1] Health 100"
+      `scoreboard players set #target ${this.options.healthObjective} -1`
+    );
+    await this.command(
+      `execute store result score #target ${this.options.healthObjective} ` +
+      "run data get entity " +
+      `@e[type=minecraft:zombie,tag=${this.options.targetTag},limit=1] Health 100`
     );
 
     return new Promise<number | null>((resolve) => {
@@ -419,7 +448,7 @@ export class StageTwoArena {
         resolve(health);
       };
       const onMessage = (message: string) => {
-        if (!message.includes("rl_stage2_health")) return;
+        if (!message.includes(this.options.healthObjective)) return;
         const match = message.match(/#target has (-?\d+)/);
         if (match) {
           const storedHealth = Number(match[1]);
@@ -428,8 +457,20 @@ export class StageTwoArena {
       };
       const timeout = setTimeout(() => finish(null), 750);
       this.bot.on("messagestr", onMessage);
-      this.bot.chat("/scoreboard players get #target rl_stage2_health");
+      this.bot.chat(
+        `/scoreboard players get #target ${this.options.healthObjective}`
+      );
     });
+  }
+
+  private async waitForBotReady(): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (this.bot.health <= 0 && Date.now() < deadline) await sleep(50);
+    if (this.bot.health <= 0) {
+      throw new Error(
+        `${this.options.stageName} reset timed out waiting for the bot to respawn.`
+      );
+    }
   }
 
   private horizontalDistanceTo(x: number, z: number): number {

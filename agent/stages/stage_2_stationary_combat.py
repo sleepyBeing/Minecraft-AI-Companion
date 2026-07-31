@@ -330,6 +330,9 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
 
 class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
 
+    BRIDGE_STAGE = "stage2"
+    BRIDGE_STAGE_NAME = "stage-two"
+
     def __init__(
         self,
         bridge_url: str = "ws://127.0.0.1:8765",
@@ -349,7 +352,7 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
         options = options or {}
         super().reset(seed=seed, options=options)
         response = self.bridge.request(
-            "stage2.reset",
+            f"{self.BRIDGE_STAGE}.reset",
             botPosition=self.bot_position.tolist(),
             targetPosition=self.target_position.tolist(),
             botYaw=self.bot_yaw,
@@ -366,7 +369,9 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
 
         distance_before_action = self._distance()
         health_before_action = self.target_health
-        response = self.bridge.request("stage2.step", action=int(action))
+        response = self.bridge.request(
+            f"{self.BRIDGE_STAGE}.step", action=int(action)
+        )
         state = response["state"]
         attack_result = state["attackResult"]
         self._apply_live_state(response["state"])
@@ -463,4 +468,7 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
                 self.elapsed_seconds if state["attackReady"] else self.elapsed_seconds + 0.001
             )
         except (KeyError, TypeError, ValueError) as error:
-            raise RuntimeError(f"Invalid stage-two state from Mineflayer: {state!r}") from error
+            raise RuntimeError(
+                f"Invalid {self.BRIDGE_STAGE_NAME} state from Mineflayer: "
+                f"{state!r}"
+            ) from error

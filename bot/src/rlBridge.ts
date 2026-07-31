@@ -2,6 +2,7 @@ import type { Bot } from "mineflayer";
 import { WebSocket, WebSocketServer } from "ws";
 import { StageOneArena } from "./rl/stageOneArena.js";
 import { StageTwoArena } from "./rl/stageTwoArena.js";
+import { StageThreeArena } from "./rl/stageThreeArena.js";
 import type { BridgeRequest } from "./rl/shared.js";
 
 export interface RlBridgeOptions {
@@ -18,6 +19,7 @@ export function startRlBridge(bot: Bot, options: RlBridgeOptions = {}): () => vo
   const server = new WebSocketServer({ host, port, maxPayload: 64 * 1024 });
   const stageOne = new StageOneArena(bot);
   const stageTwo = new StageTwoArena(bot);
+  const stageThree = new StageThreeArena(bot);
   let client: WebSocket | null = null;
   let trainingActive = false;
 
@@ -129,6 +131,31 @@ export function startRlBridge(bot: Bot, options: RlBridgeOptions = {}): () => vo
         case "stage2.observe": {
           if (!trainingActive) throw new Error("Call stage2.reset before observing");
           send(socket, { id: request.id, ok: true, state: stageTwo.observe() });
+          return;
+        }
+
+        case "stage3.reset": {
+          if (!trainingActive) {
+            trainingActive = true;
+            options.onTrainingStart?.();
+          }
+          const state = await stageThree.reset(request);
+          send(socket, { id: request.id, ok: true, state });
+          return;
+        }
+
+        case "stage3.step": {
+          if (!trainingActive) throw new Error("Call stage3.reset before stage3.step");
+          if (!Number.isInteger(request.action) || request.action! < 0 || request.action! > 7)
+            throw new Error("Stage-three action must be an integer from 0 to 7");
+          const state = await stageThree.step(request.action!);
+          send(socket, { id: request.id, ok: true, state });
+          return;
+        }
+
+        case "stage3.observe": {
+          if (!trainingActive) throw new Error("Call stage3.reset before observing");
+          send(socket, { id: request.id, ok: true, state: stageThree.observe() });
           return;
         }
 
