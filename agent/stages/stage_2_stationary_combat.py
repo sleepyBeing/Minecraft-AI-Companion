@@ -141,9 +141,10 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
 
         selected_action = StationaryCombatAction(action)
         distance_before_action = self._distance()
+        in_attack_range_before = self._is_in_attack_range()
         damage_dealt = 0.0
         attack_selected = selected_action == StationaryCombatAction.ATTACK
-        invalid_attack = attack_selected and distance_before_action > self.ATTACK_RANGE
+        invalid_attack = attack_selected and not in_attack_range_before
         valid_attack_attempt = False
         cooldown_blocked = False
         attack_landed = False
@@ -170,12 +171,13 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
 
         self.elapsed_seconds += self.STEP_SECONDS
         distance_after_action = self._distance()
+        in_attack_range_after = self._is_in_attack_range()
         distance_change = distance_before_action - distance_after_action
         approach_reward = distance_change * self.APPROACH_REWARD_SCALE
         entered_attack_range = (
             not self.attack_range_bonus_awarded
-            and distance_before_action > self.ATTACK_RANGE
-            and distance_after_action <= self.ATTACK_RANGE
+            and not in_attack_range_before
+            and in_attack_range_after
         )
         if entered_attack_range:
             self.attack_range_bonus_awarded = True
@@ -271,7 +273,7 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
                 relative_target[0],
                 relative_target[1],
                 self._distance() / (np.sqrt(2.0) * self.ROOM_SIZE),
-                float(self._distance() <= self.ATTACK_RANGE),
+                float(self._is_in_attack_range()),
                 self.target_health / self.ZOMBIE_MAX_HEALTH,
                 float(self.target_alive),
                 float(self.elapsed_seconds >= self.next_attack_time),
@@ -288,7 +290,7 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
             "target_health": self.target_health,
             "target_alive": self.target_alive,
             "target_visible": self.target_visible,
-            "in_attack_range": self._distance() <= self.ATTACK_RANGE,
+            "in_attack_range": self._is_in_attack_range(),
             "attack_ready": self.elapsed_seconds >= self.next_attack_time,
             "bot_position": self.bot_position.copy(),
             "target_position": self.target_position.copy(),
@@ -325,6 +327,9 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
     def _distance(self) -> float:
         return float(np.linalg.norm(self.target_position - self.bot_position))
 
+    def _is_in_attack_range(self) -> bool:
+        return self._distance() <= self.ATTACK_RANGE
+
     @staticmethod
     def _wrap_angle(angle: float) -> float:
         return float((angle + np.pi) % (2.0 * np.pi) - np.pi)
@@ -343,6 +348,8 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
         render_mode: str | None = None,
     ) -> None:
         super().__init__(render_mode=render_mode)
+        self.server_attack_distance: float | None = None
+        self.server_in_attack_range = False
         self.bridge = MinecraftWebSocketBridge(bridge_url, timeout=bridge_timeout)
 
     def reset(
@@ -370,6 +377,7 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
             raise ValueError(f"Invalid action {action}; expected an integer from 0 to 7")
 
         distance_before_action = self._distance()
+        in_attack_range_before = self._is_in_attack_range()
         health_before_action = self.target_health
         response = self.bridge.request(
             f"{self.BRIDGE_STAGE}.step", action=int(action)
@@ -380,12 +388,13 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
 
         damage_dealt = max(0.0, health_before_action - self.target_health)
         distance_after_action = self._distance()
+        in_attack_range_after = self._is_in_attack_range()
         distance_change = distance_before_action - distance_after_action
         approach_reward = distance_change * self.APPROACH_REWARD_SCALE
         entered_attack_range = (
             not self.attack_range_bonus_awarded
-            and distance_before_action > self.ATTACK_RANGE
-            and distance_after_action <= self.ATTACK_RANGE
+            and not in_attack_range_before
+            and in_attack_range_after
         )
         if entered_attack_range:
             self.attack_range_bonus_awarded = True
@@ -450,6 +459,9 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
     def close(self) -> None:
         self.bridge.close()
 
+    def _is_in_attack_range(self) -> bool:
+        return self.server_in_attack_range
+
     def _apply_live_state(self, state: dict[str, Any]) -> None:
         try:
             bot_position = np.asarray(state["botPosition"], dtype=np.float32)
@@ -466,6 +478,11 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
             self.target_health = float(state["targetHealth"])
             self.target_alive = bool(state["targetAlive"])
             self.target_visible = bool(state["targetVisible"])
+            attack_distance = state["attackDistance"]
+            self.server_attack_distance = (
+                None if attack_distance is None else float(attack_distance)
+            )
+            self.server_in_attack_range = bool(state["inAttackRange"])
             self.elapsed_seconds = float(state["elapsedSeconds"])
             self.next_attack_time = (
                 self.elapsed_seconds if state["attackReady"] else self.elapsed_seconds + 0.001

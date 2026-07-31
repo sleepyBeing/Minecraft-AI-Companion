@@ -311,6 +311,12 @@ export class StageTwoArena {
     const distance = target
       ? this.horizontalDistanceTo(target.position.x, target.position.z)
       : this.horizontalDistanceToWorldTarget();
+    // Use the exact same eye-to-target-center measurement as attack
+    // validation. This prevents Python from calling a boundary state
+    // "in range" while the bridge rejects every attack from that state.
+    const attackDistance = target ? this.attackDistanceTo(target) : null;
+    const inAttackRange =
+      attackDistance !== null && attackDistance <= ATTACK_RANGE;
     return {
       botPosition: [botX, botZ],
       targetPosition: observedTargetPosition,
@@ -322,6 +328,8 @@ export class StageTwoArena {
       targetAlive,
       targetVisible: target !== null,
       distance,
+      attackDistance,
+      inAttackRange,
       attackReady: this.elapsedSeconds >= this.nextAttackTime,
       attackResult: { ...this.lastActionResult },
       elapsedSeconds: this.elapsedSeconds,

@@ -53,8 +53,7 @@ def main() -> None:
         raise ValueError("Stage Three requires a one-dimensional observation space")
     observation_size = int(observation_shape[0])
     action_count = int(environment.action_space.n)
-
-    # The unchanged shape permits direct Stage Two actor transfer.
+    
     actor = build_stage_two_actor(
         tf,
         observation_size=observation_size,
