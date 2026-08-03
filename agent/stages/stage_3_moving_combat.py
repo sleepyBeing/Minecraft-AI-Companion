@@ -181,9 +181,6 @@ class LiveStageThreeMovingCombatEnv(
             damage_taken * self.DAMAGE_TAKEN_PENALTY_SCALE
         )
         reward -= damage_taken_penalty
-
-        # Use the bridge's latched Mineflayer death event. A health-only check
-        # can miss death when the bot respawns before this state is sampled.
         bot_defeated = self.bot_defeated or self.bot_health <= 0
         terminated = terminated or bot_defeated
         truncated = truncated and not terminated

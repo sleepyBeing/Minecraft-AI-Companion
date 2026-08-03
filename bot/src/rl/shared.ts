@@ -10,11 +10,15 @@ export interface BridgeRequest {
     | "stage2.observe"
     | "stage3.reset"
     | "stage3.step"
-    | "stage3.observe";
+    | "stage3.observe"
+    | "stage4.reset"
+    | "stage4.step"
+    | "stage4.observe";
   action?: number;
   botPosition?: [number, number];
   targetPosition?: [number, number];
   botYaw?: number;
+  botHealth?: number;
   rebuildArena?: boolean;
 }
 

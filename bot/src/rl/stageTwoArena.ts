@@ -23,6 +23,7 @@ export interface CombatArenaOptions {
   targetTag: string;
   healthObjective: string;
   stationaryTarget: boolean;
+  naturalRegeneration?: boolean;
 }
 
 const STAGE_TWO_OPTIONS: CombatArenaOptions = {
@@ -33,7 +34,7 @@ const STAGE_TWO_OPTIONS: CombatArenaOptions = {
 };
 
 export class StageTwoArena {
-  private origin: ArenaOrigin | null = null;
+  protected origin: ArenaOrigin | null = null;
   private arenaBuilt = false;
   private targetPosition: [number, number] = [10.5, 7.5];
   private targetEntityId: number | null = null;
@@ -47,8 +48,8 @@ export class StageTwoArena {
   private lastActionResult = createEmptyAttackResult();
 
   constructor(
-    private readonly bot: Bot,
-    private readonly options: CombatArenaOptions = STAGE_TWO_OPTIONS
+    protected readonly bot: Bot,
+    protected readonly options: CombatArenaOptions = STAGE_TWO_OPTIONS
   ) {
     bot.on("entityHurt", (entity) => {
       if (!entity || entity.id !== this.targetEntityId) return;
@@ -89,6 +90,7 @@ export class StageTwoArena {
       throw new Error("Stage-two positions must start between 5 and 8 blocks apart");
 
     const yaw = Number.isFinite(request.botYaw) ? request.botYaw! : 0;
+    const botHealth = validateStartingHealth(request.botHealth ?? 20);
     if (!this.origin) this.origin = this.createOrigin();
     if (!this.arenaBuilt || request.rebuildArena) await this.buildArena();
     else await this.sanitizeArena();
@@ -109,7 +111,13 @@ export class StageTwoArena {
     await this.command("effect clear @s");
     await this.command("attribute @s minecraft:max_health base set 20");
     await this.command("effect give @s minecraft:instant_health 1 255 true");
-    await this.command("effect give @s minecraft:saturation 999999 0 true");
+    await this.command(
+      `gamerule naturalRegeneration ${this.options.naturalRegeneration === false ? "false" : "true"}`
+    );
+    if (this.options.naturalRegeneration === false)
+      await this.command("effect give @s minecraft:saturation 1 255 true");
+    else
+      await this.command("effect give @s minecraft:saturation 999999 0 true");
     await this.command("attribute @s minecraft:scale base set 0.9999999");
     await this.command(
       `kill @e[type=minecraft:zombie,tag=${this.options.targetTag}]`
@@ -141,6 +149,13 @@ export class StageTwoArena {
     if (!ironSword)
       throw new Error("The bot did not receive its iron sword. Ensure it is a server operator.");
     await this.bot.equip(ironSword, "hand");
+
+    if (this.options.naturalRegeneration === false)
+      await this.command("effect clear @s minecraft:saturation");
+    if (botHealth < 20) {
+      await this.command(`damage @s ${20 - botHealth} minecraft:generic`);
+      await sleep(100);
+    }
 
     const targetEntity = Object.values(this.bot.entities).find((entity) =>
       entity.name === "zombie" &&
@@ -267,6 +282,9 @@ export class StageTwoArena {
           }
           break;
         }
+        default:
+          if (!(await this.handleExtendedAction(action)))
+            throw new Error(`${this.options.stageName} does not support action ${action}`);
       }
 
       // Tracking can disappear during any action, not only ATTACK. Give
@@ -337,7 +355,11 @@ export class StageTwoArena {
     };
   }
 
-  private getTargetEntity(): Entity | null {
+  protected async handleExtendedAction(_action: number): Promise<boolean> {
+    return false;
+  }
+
+  protected getTargetEntity(): Entity | null {
     if (this.targetConfirmedDead || !this.origin) return null;
     if (this.targetEntityId !== null) {
       const entity = this.bot.entities[this.targetEntityId];
@@ -403,7 +425,7 @@ export class StageTwoArena {
     }
   }
 
-  private attackDistanceTo(target: Entity): number {
+  protected attackDistanceTo(target: Entity): number {
     const eye = this.bot.entity.position.offset(0, 1.62, 0);
     const targetCenter = target.position.offset(0, target.height * 0.5, 0);
     return eye.distanceTo(targetCenter);
@@ -544,15 +566,21 @@ export class StageTwoArena {
     );
   }
 
-  private worldPosition(local: [number, number]) {
+  protected worldPosition(local: [number, number]) {
     if (!this.origin) throw new Error("Arena origin is unavailable");
     return { x: this.origin.x + local[0], z: this.origin.z + local[1] };
   }
 
-  private async command(command: string): Promise<void> {
+  protected async command(command: string): Promise<void> {
     this.bot.chat(`/${command}`);
     await sleep(75);
   }
+}
+
+function validateStartingHealth(value: number): number {
+  if (![5, 10, 20].includes(value))
+    throw new Error("botHealth must be one of 5, 10, or 20");
+  return value;
 }
 
 function createEmptyAttackResult() {

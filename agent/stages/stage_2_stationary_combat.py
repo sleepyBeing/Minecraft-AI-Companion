@@ -21,6 +21,8 @@ class StationaryCombatAction(IntEnum):
     TURN_LEFT = 5
     TURN_RIGHT = 6
     ATTACK = 7
+    RETREAT = 8
+    MOVE_TO_SAFE_AREA = 9
 
 
 class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
@@ -69,7 +71,10 @@ class StageTwoStationaryCombatEnv(gym.Env[np.ndarray, int]):
             raise ValueError("render_mode must be None or 'ansi'")
 
         self.render_mode = render_mode
-        self.action_space = spaces.Discrete(len(StationaryCombatAction))
+        # Stages two and three use the original eight actions. Later stages
+        # may opt into the two extended movement actions without changing the
+        # meaning of actions 0-7.
+        self.action_space = spaces.Discrete(8)
         self.observation_space = spaces.Box(
             low=np.array(
                 [
@@ -365,6 +370,7 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
             botPosition=self.bot_position.tolist(),
             targetPosition=self.target_position.tolist(),
             botYaw=self.bot_yaw,
+            botHealth=self.bot_health,
             rebuildArena=bool(options.get("rebuild_arena", False)),
         )
         self._apply_live_state(response["state"])
