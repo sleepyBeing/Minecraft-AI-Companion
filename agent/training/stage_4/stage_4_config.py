@@ -25,7 +25,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--simulation", action="store_true")
     parser.add_argument("--bridge-url", default="ws://127.0.0.1:8765")
     parser.add_argument("--bridge-timeout", type=positive_float, default=15.0)
-    parser.add_argument("--rollout-steps", type=positive_integer, default=1_024)
+    parser.add_argument("--rollout-steps", type=positive_integer, default=2_048)
     parser.add_argument("--batch-size", type=positive_integer, default=64)
 
     actor = parser.add_argument_group("actor")
@@ -49,11 +49,11 @@ def parse_arguments() -> argparse.Namespace:
     critic = parser.add_argument_group("critic")
     critic.add_argument("--critic-epochs", type=positive_integer, default=10)
     critic.add_argument(
-        "--critic-learning-rate", type=positive_float, default=3e-4
+        "--critic-learning-rate", type=positive_float, default=1.5e-4
     )
     critic.add_argument("--critic-hidden-size", type=positive_integer, default=128)
     critic.add_argument("--critic-loss", choices=("huber", "mse"), default="huber")
-    critic.add_argument("--critic-huber-delta", type=positive_float, default=10.0)
+    critic.add_argument("--critic-huber-delta", type=positive_float, default=5.0)
     critic.add_argument(
         "--critic-max-gradient-norm", type=positive_float, default=1.0
     )
