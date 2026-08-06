@@ -125,6 +125,19 @@ export class StageTwoArena {
     await this.clearArenaEntities();
     await this.command("give @s minecraft:iron_sword 1");
 
+    let ironSword = await this.waitForInventoryItem("iron_sword", 2_000);
+    if (!ironSword) {
+      await this.command("give @s minecraft:iron_sword 1");
+      ironSword = await this.waitForInventoryItem("iron_sword", 2_000);
+    }
+    if (!ironSword) {
+      throw new Error(
+        "The iron sword was not visible after two give attempts. " +
+        "Check operator permissions and inventory synchronization."
+      );
+    }
+    await this.bot.equip(ironSword, "hand");
+
     const target = this.worldPosition(targetPosition);
     const stationaryNbt = this.options.stationaryTarget ? "NoAI:1b," : "";
     await this.command(
@@ -144,11 +157,6 @@ export class StageTwoArena {
     const yawDegrees = yaw * 180 / Math.PI;
     await this.command(`tp @s ${spawn.x} ${this.origin.y + 1} ${spawn.z} ${yawDegrees} 0`);
     await sleep(300);
-
-    const ironSword = this.bot.inventory.items().find((item) => item.name === "iron_sword");
-    if (!ironSword)
-      throw new Error("The bot did not receive its iron sword. Ensure it is a server operator.");
-    await this.bot.equip(ironSword, "hand");
 
     if (this.options.naturalRegeneration === false)
       await this.command("effect clear @s minecraft:saturation");
@@ -513,6 +521,16 @@ export class StageTwoArena {
         `${this.options.stageName} reset timed out waiting for the bot to respawn.`
       );
     }
+  }
+
+  private async waitForInventoryItem(name: string, timeoutMs: number) {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      const item = this.bot.inventory.items().find((entry) => entry.name === name);
+      if (item) return item;
+      await sleep(50);
+    } while (Date.now() < deadline);
+    return null;
   }
 
   private horizontalDistanceTo(x: number, z: number): number {

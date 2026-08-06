@@ -36,16 +36,23 @@ def run_live_stage_four_preflight(
         )
 
     distance_before_retreat = float(info["distance_to_target"])
-    _, _, terminated, truncated, retreat_info = environment.step(
-        int(StationaryCombatAction.RETREAT)
-    )
-    if terminated or truncated:
-        environment.close()
-        raise RuntimeError("Stage-four preflight failed during the retreat action.")
-    if float(retreat_info["distance_to_target"]) <= distance_before_retreat:
+    furthest_retreat_distance = distance_before_retreat
+    retreat_info = info
+    for _ in range(5):
+        _, _, terminated, truncated, retreat_info = environment.step(
+            int(StationaryCombatAction.RETREAT)
+        )
+        if terminated or truncated:
+            environment.close()
+            raise RuntimeError("Stage-four preflight failed during retreat actions.")
+        furthest_retreat_distance = max(
+            furthest_retreat_distance,
+            float(retreat_info["distance_to_target"]),
+        )
+    if furthest_retreat_distance < distance_before_retreat + 0.25:
         environment.close()
         raise RuntimeError(
-            "Stage-four preflight failed: RETREAT did not increase zombie distance."
+            "Stage-four preflight failed: sustained RETREAT did not create distance."
         )
 
     _, info = environment.reset(
@@ -119,7 +126,7 @@ def run_live_stage_four_preflight(
 
     print(
         "Live Stage Four preflight passed: "
-        f"retreat_gain={float(retreat_info['distance_to_target']) - distance_before_retreat:.2f}, "
+        f"retreat_gain={furthest_retreat_distance - distance_before_retreat:.2f}, "
         f"safe_progress={safe_distance_before - float(safe_info['distance_to_safe_position']):.2f}, "
         f"damage_taken={total_damage_taken:.1f}, "
         f"damage_dealt={float(attack_info['damage_dealt']):.1f}"
