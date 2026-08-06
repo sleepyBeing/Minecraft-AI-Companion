@@ -153,7 +153,9 @@ export class StageTwoArena {
     if (this.options.naturalRegeneration === false)
       await this.command("effect clear @s minecraft:saturation");
     if (botHealth < 20) {
-      await this.command(`damage @s ${20 - botHealth} minecraft:generic`);
+
+      await this.command(`attribute @s minecraft:max_health base set ${botHealth}`);
+      await this.command("effect give @s minecraft:instant_health 1 255 true");
       await sleep(100);
     }
 

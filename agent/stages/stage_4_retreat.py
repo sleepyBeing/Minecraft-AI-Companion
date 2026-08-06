@@ -283,6 +283,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
                 "distance_to_safe_position": float(
                     np.linalg.norm(safe_position - self.bot_position)
                 ),
+                "starting_bot_health": self.starting_bot_health,
                 "in_cover": self._is_in_cover(),
                 "low_health": self.bot_health <= self.LOW_HEALTH_THRESHOLD,
             }

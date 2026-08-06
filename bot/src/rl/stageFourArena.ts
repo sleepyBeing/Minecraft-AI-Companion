@@ -50,6 +50,8 @@ export class StageFourArena extends StageTwoArena {
 
   async restoreWorldSettings(): Promise<void> {
     await this.command("gamerule naturalRegeneration true");
+    await this.command("attribute @s minecraft:max_health base set 20");
+    await this.command("effect give @s minecraft:instant_health 1 255 true");
   }
 
   protected override async handleExtendedAction(action: number): Promise<boolean> {
