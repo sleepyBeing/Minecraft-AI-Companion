@@ -34,6 +34,11 @@ def run_live_stage_four_preflight(
         raise RuntimeError(
             "Stage-four preflight failed: the five-health scenario was not applied."
         )
+    if not bool(info["survival_mode"]) or observation[-1] != 1.0:
+        environment.close()
+        raise RuntimeError(
+            "Stage-four preflight failed: five health did not select survival mode."
+        )
 
     distance_before_retreat = float(info["distance_to_target"])
     furthest_retreat_distance = distance_before_retreat
@@ -81,6 +86,11 @@ def run_live_stage_four_preflight(
         seed=2,
         options={**BASE_OPTIONS, "bot_health": 20},
     )
+    if bool(info["survival_mode"]):
+        environment.close()
+        raise RuntimeError(
+            "Stage-four preflight failed: 20 health selected survival mode."
+        )
     starting_distance = float(info["distance_to_target"])
     total_damage_taken = 0.0
     for _ in range(45):

@@ -19,6 +19,8 @@ const SAFE_OFFSET = 1.75;
 
 /** Moving-zombie arena with low-health retreat and solid cover mechanics. */
 export class StageFourArena extends StageTwoArena {
+  private survivalMode = false;
+
   constructor(bot: Bot) {
     super(bot, {
       stageName: "Stage-four",
@@ -30,7 +32,14 @@ export class StageFourArena extends StageTwoArena {
   }
 
   override async reset(request: BridgeRequest) {
+    this.survivalMode = request.botHealth === 5 || request.botHealth === 10;
     await super.reset(request);
+    if (this.survivalMode) {
+      await this.command(
+        `data merge entity @e[type=minecraft:zombie,tag=${this.options.targetTag},limit=1] ` +
+        "{Invulnerable:1b}"
+      );
+    }
     await this.buildCover();
     return this.observe();
   }
@@ -44,7 +53,8 @@ export class StageFourArena extends StageTwoArena {
       ...state,
       safePosition,
       distanceToSafe: distance(botPosition, safePosition),
-      inCover: isLineBlocked(botPosition, targetPosition)
+      inCover: isLineBlocked(botPosition, targetPosition),
+      survivalMode: this.survivalMode
     };
   }
 

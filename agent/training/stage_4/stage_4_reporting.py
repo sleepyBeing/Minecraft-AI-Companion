@@ -29,6 +29,12 @@ def write_configuration(
         {
             "stage": 4,
             "task": "health_aware_combat_retreat_and_survival",
+            "scenario_design": {
+                "starting_health_20": "combat_retreat",
+                "starting_health_5_or_10": "survival_only",
+                "survival_target_invulnerable": True,
+                "survival_success": "alive_at_60_second_timeout",
+            },
             "source": source,
             "algorithm": "PPO",
             "framework": "TensorFlow",
@@ -78,6 +84,9 @@ def write_rollout_summaries(
             "retreat/safe_area_actions": np.sum(rollout["safe_area_actions"]),
             "retreat/wait_actions": np.sum(rollout["wait_actions"]),
             "retreat/low_health_fraction": np.mean(rollout["low_health_steps"]),
+            "scenario/survival_fraction": np.mean(
+                rollout["survival_mode_steps"]
+            ),
             "retreat/mean_progress_reward": np.mean(rollout["retreat_rewards"]),
             "cover/covered_fraction": np.mean(rollout["cover_steps"]),
             "cover/entries": np.sum(rollout["cover_entries"]),
@@ -88,6 +97,15 @@ def write_rollout_summaries(
                 rollout["cover_progress_rewards"]
             ),
             "cover/total_reward": np.sum(rollout["cover_rewards"]),
+            "cover/maintenance_reward": np.sum(
+                rollout["cover_maintenance_rewards"]
+            ),
+            "outcome/survival_step_rewards": np.sum(
+                rollout["survival_step_rewards"]
+            ),
+            "outcome/survival_attack_penalties": np.sum(
+                rollout["survival_attack_penalties"]
+            ),
             "outcome/survival_rewards": np.sum(rollout["survival_rewards"]),
             "outcome/death_penalties": np.sum(rollout["death_penalties"]),
             "positioning/mean_approach_reward": np.mean(
@@ -118,6 +136,7 @@ def print_rollout(
         f"cover_entries={int(np.sum(rollout['cover_entries']))} "
         f"covered={np.mean(rollout['cover_steps']):.1%} "
         f"low_health={np.mean(rollout['low_health_steps']):.1%} "
+        f"survival_mode={np.mean(rollout['survival_mode_steps']):.1%} "
         f"survival_bonus={np.sum(rollout['survival_rewards']):.1f} "
         f"actor_epochs={int(metrics['actor_epochs_completed'])} "
         f"kl_stop={int(metrics['actor_early_stopped'])} "

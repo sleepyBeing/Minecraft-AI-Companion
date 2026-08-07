@@ -19,6 +19,10 @@ class StageFourEpisodeState:
 
     def reset_episode(self, starting_health: float) -> None:
         self.starting_health = starting_health
+        self.survival_mode = (
+            starting_health
+            in StageFourRetreatEnv.SURVIVAL_STARTING_HEALTH_OPTIONS
+        )
         self.episode_return = 0.0
         self.episode_length = 0
         self.damage_dealt = 0.0
@@ -41,6 +45,9 @@ class StageFourEpisodeState:
         self.retreat_reward = 0.0
         self.cover_progress_reward = 0.0
         self.cover_reward = 0.0
+        self.cover_maintenance_reward = 0.0
+        self.survival_step_reward = 0.0
+        self.survival_attack_penalty = 0.0
         self.survival_reward = 0.0
         self.death_penalty = 0.0
 
@@ -83,11 +90,15 @@ def collect_stage_four_rollout(
         "safe_area_actions",
         "wait_actions",
         "low_health_steps",
+        "survival_mode_steps",
         "cover_steps",
         "cover_entries",
         "retreat_rewards",
         "cover_progress_rewards",
         "cover_rewards",
+        "cover_maintenance_rewards",
+        "survival_step_rewards",
+        "survival_attack_penalties",
         "survival_rewards",
         "death_penalties",
     )
@@ -118,6 +129,7 @@ def collect_stage_four_rollout(
         safe_area_action = action == int(StationaryCombatAction.MOVE_TO_SAFE_AREA)
         wait_action = action == int(StationaryCombatAction.WAIT)
         low_health = bool(info["low_health"])
+        survival_mode = bool(info["survival_mode"])
         in_cover = bool(info["in_cover"])
         cover_reward = float(info["cover_reward"])
 
@@ -145,11 +157,19 @@ def collect_stage_four_rollout(
             "safe_area_actions": float(safe_area_action),
             "wait_actions": float(wait_action),
             "low_health_steps": float(low_health),
+            "survival_mode_steps": float(survival_mode),
             "cover_steps": float(in_cover),
             "cover_entries": float(cover_reward > 0),
             "retreat_rewards": float(info["retreat_progress_reward"]),
             "cover_progress_rewards": float(info["cover_progress_reward"]),
             "cover_rewards": cover_reward,
+            "cover_maintenance_rewards": float(
+                info["cover_maintenance_reward"]
+            ),
+            "survival_step_rewards": float(info["survival_step_reward"]),
+            "survival_attack_penalties": float(
+                info["survival_attack_penalty"]
+            ),
             "survival_rewards": float(info["survival_reward"]),
             "death_penalties": float(info["death_penalty"]),
         }
@@ -180,6 +200,15 @@ def collect_stage_four_rollout(
             info["cover_progress_reward"]
         )
         episode_state.cover_reward += cover_reward
+        episode_state.cover_maintenance_reward += float(
+            info["cover_maintenance_reward"]
+        )
+        episode_state.survival_step_reward += float(
+            info["survival_step_reward"]
+        )
+        episode_state.survival_attack_penalty += float(
+            info["survival_attack_penalty"]
+        )
         episode_state.survival_reward += float(info["survival_reward"])
         episode_state.death_penalty += float(info["death_penalty"])
         observation = next_observation
@@ -274,6 +303,7 @@ def _finish_episode(
             "kill": float(killed_target),
             "survived_timeout": float(survived_timeout),
             "starting_health": state.starting_health,
+            "survival_mode": float(state.survival_mode),
             "damage_dealt": state.damage_dealt,
             "damage_taken": state.damage_taken,
             "bot_defeats": state.bot_defeats,
@@ -285,6 +315,9 @@ def _finish_episode(
             "retreat_reward": state.retreat_reward,
             "cover_progress_reward": state.cover_progress_reward,
             "cover_reward": state.cover_reward,
+            "cover_maintenance_reward": state.cover_maintenance_reward,
+            "survival_step_reward": state.survival_step_reward,
+            "survival_attack_penalty": state.survival_attack_penalty,
             "survival_reward": state.survival_reward,
             "death_penalty": state.death_penalty,
         }.items():
@@ -299,6 +332,7 @@ class StageFourEpisodeCsvLogger:
         "success",
         "outcome",
         "starting_health",
+        "scenario",
         "final_health",
         "final_distance",
         "target_health",
@@ -318,6 +352,9 @@ class StageFourEpisodeCsvLogger:
         "retreat_reward",
         "cover_progress_reward",
         "cover_reward",
+        "cover_maintenance_reward",
+        "survival_step_reward",
+        "survival_attack_penalty",
         "survival_reward",
         "death_penalty",
         "target_tracking_failures",
@@ -353,6 +390,7 @@ class StageFourEpisodeCsvLogger:
                 int(success),
                 outcome,
                 starting_health,
+                "survival" if state.survival_mode else "combat_retreat",
                 final_health,
                 final_distance,
                 target_health,
@@ -372,6 +410,9 @@ class StageFourEpisodeCsvLogger:
                 state.retreat_reward,
                 state.cover_progress_reward,
                 state.cover_reward,
+                state.cover_maintenance_reward,
+                state.survival_step_reward,
+                state.survival_attack_penalty,
                 state.survival_reward,
                 state.death_penalty,
                 state.target_tracking_failures,
