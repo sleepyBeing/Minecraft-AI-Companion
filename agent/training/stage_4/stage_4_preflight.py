@@ -57,7 +57,7 @@ def run_live_stage_four_preflight(
 
     _, info = environment.reset(
         seed=1,
-        options={**BASE_OPTIONS, "bot_health": 20},
+        options={**BASE_OPTIONS, "bot_health": 5},
     )
     safe_distance_before = float(info["distance_to_safe_position"])
     _, _, terminated, truncated, safe_info = environment.step(
@@ -70,6 +70,11 @@ def run_live_stage_four_preflight(
         environment.close()
         raise RuntimeError(
             "Stage-four preflight failed: MOVE_TO_SAFE_AREA did not approach cover."
+        )
+    if float(safe_info["cover_progress_reward"]) <= 0:
+        environment.close()
+        raise RuntimeError(
+            "Stage-four preflight failed: approaching cover earned no progress reward."
         )
 
     _, info = environment.reset(

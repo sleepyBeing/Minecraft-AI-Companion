@@ -39,6 +39,7 @@ class StageFourEpisodeState:
         self.cover_steps = 0
         self.cover_entries = 0
         self.retreat_reward = 0.0
+        self.cover_progress_reward = 0.0
         self.cover_reward = 0.0
         self.survival_reward = 0.0
         self.death_penalty = 0.0
@@ -85,6 +86,7 @@ def collect_stage_four_rollout(
         "cover_steps",
         "cover_entries",
         "retreat_rewards",
+        "cover_progress_rewards",
         "cover_rewards",
         "survival_rewards",
         "death_penalties",
@@ -146,6 +148,7 @@ def collect_stage_four_rollout(
             "cover_steps": float(in_cover),
             "cover_entries": float(cover_reward > 0),
             "retreat_rewards": float(info["retreat_progress_reward"]),
+            "cover_progress_rewards": float(info["cover_progress_reward"]),
             "cover_rewards": cover_reward,
             "survival_rewards": float(info["survival_reward"]),
             "death_penalties": float(info["death_penalty"]),
@@ -173,6 +176,9 @@ def collect_stage_four_rollout(
         episode_state.cover_steps += int(in_cover)
         episode_state.cover_entries += int(cover_reward > 0)
         episode_state.retreat_reward += float(info["retreat_progress_reward"])
+        episode_state.cover_progress_reward += float(
+            info["cover_progress_reward"]
+        )
         episode_state.cover_reward += cover_reward
         episode_state.survival_reward += float(info["survival_reward"])
         episode_state.death_penalty += float(info["death_penalty"])
@@ -277,6 +283,7 @@ def _finish_episode(
             "cover_steps": state.cover_steps,
             "cover_entries": state.cover_entries,
             "retreat_reward": state.retreat_reward,
+            "cover_progress_reward": state.cover_progress_reward,
             "cover_reward": state.cover_reward,
             "survival_reward": state.survival_reward,
             "death_penalty": state.death_penalty,
@@ -309,6 +316,7 @@ class StageFourEpisodeCsvLogger:
         "cover_steps",
         "cover_entries",
         "retreat_reward",
+        "cover_progress_reward",
         "cover_reward",
         "survival_reward",
         "death_penalty",
@@ -362,6 +370,7 @@ class StageFourEpisodeCsvLogger:
                 state.cover_steps,
                 state.cover_entries,
                 state.retreat_reward,
+                state.cover_progress_reward,
                 state.cover_reward,
                 state.survival_reward,
                 state.death_penalty,

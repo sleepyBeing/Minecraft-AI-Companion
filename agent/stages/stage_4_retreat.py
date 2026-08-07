@@ -25,6 +25,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
     SAFE_OFFSET = 1.75
 
     RETREAT_PROGRESS_REWARD_SCALE = 1.5
+    COVER_PROGRESS_REWARD_SCALE = 1.0
     COVER_DISCOVERY_REWARD = 3.0
     HEALTHY_COVER_REWARD = 0.5
     HEALTHY_RETREAT_ACTION_PENALTY = 0.05
@@ -80,6 +81,8 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
             {
                 "starting_bot_health": self.starting_bot_health,
                 "retreat_progress_reward": 0.0,
+                "cover_progress_reward": 0.0,
+                "cover_distance_change": 0.0,
                 "cover_reward": 0.0,
                 "survival_reward": 0.0,
                 "death_penalty": 0.0,
@@ -93,12 +96,18 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         health_before_action = self.bot_health
         in_cover_before = self._is_in_cover()
+        safe_position_before = self._nearest_safe_position()
+        safe_distance_before = float(
+            np.linalg.norm(safe_position_before - self.bot_position)
+        )
         observation, reward, terminated, truncated, info = super().step(action)
         del observation
         return self._apply_stage_four_rewards(
             action=action,
             health_before_action=health_before_action,
             in_cover_before=in_cover_before,
+            safe_position_before=safe_position_before,
+            safe_distance_before=safe_distance_before,
             reward=reward,
             terminated=terminated,
             truncated=truncated,
@@ -112,6 +121,8 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         action: int,
         health_before_action: float,
         in_cover_before: bool,
+        safe_position_before: np.ndarray,
+        safe_distance_before: float,
         reward: float,
         terminated: bool,
         truncated: bool,
@@ -135,6 +146,17 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
             reward -= self.HEALTHY_RETREAT_ACTION_PENALTY
 
         in_cover_after = self._is_in_cover()
+        safe_distance_after = float(
+            np.linalg.norm(safe_position_before - self.bot_position)
+        )
+        cover_distance_change = safe_distance_before - safe_distance_after
+        cover_progress_reward = 0.0
+        if low_health and self.target_alive and not in_cover_before:
+            cover_progress_reward = (
+                cover_distance_change * self.COVER_PROGRESS_REWARD_SCALE
+            )
+            reward += cover_progress_reward
+
         cover_reward = 0.0
         if (
             not self.cover_bonus_awarded
@@ -171,6 +193,8 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
                 "starting_bot_health": self.starting_bot_health,
                 "low_health": low_health,
                 "retreat_progress_reward": retreat_progress_reward,
+                "cover_progress_reward": cover_progress_reward,
+                "cover_distance_change": cover_distance_change,
                 "cover_reward": cover_reward,
                 "survival_reward": survival_reward,
                 "death_penalty": death_penalty,
@@ -405,6 +429,10 @@ class LiveStageFourRetreatEnv(
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         health_before_action = self.bot_health
         in_cover_before = self._is_in_cover()
+        safe_position_before = self._nearest_safe_position()
+        safe_distance_before = float(
+            np.linalg.norm(safe_position_before - self.bot_position)
+        )
         observation, reward, terminated, truncated, info = (
             LiveStageTwoStationaryCombatEnv.step(self, action)
         )
@@ -429,6 +457,8 @@ class LiveStageFourRetreatEnv(
             action=action,
             health_before_action=health_before_action,
             in_cover_before=in_cover_before,
+            safe_position_before=safe_position_before,
+            safe_distance_before=safe_distance_before,
             reward=reward,
             terminated=terminated,
             truncated=truncated,
