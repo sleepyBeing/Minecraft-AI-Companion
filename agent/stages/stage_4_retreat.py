@@ -188,6 +188,16 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         cover_distance_change = safe_distance_before - safe_distance_after
         cover_progress_reward = 0.0
         if low_health and self.target_alive and not in_cover_before:
+            if (
+                action == int(StationaryCombatAction.MOVE_TO_SAFE_AREA)
+                and cover_distance_change > 0.0
+                and retreat_progress_reward < 0.0
+            ):
+                # Moving laterally toward cover can temporarily let the
+                # pursuing zombie close the gap. Do not punish a successful
+                # safe-area step for that expected geometric tradeoff.
+                reward -= retreat_progress_reward
+                retreat_progress_reward = 0.0
             cover_progress_reward = (
                 cover_distance_change * self.COVER_PROGRESS_REWARD_SCALE
             )
