@@ -35,7 +35,8 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
     SURVIVAL_STEP_REWARD = 0.02
     SURVIVAL_ATTACK_PENALTY = 0.05
     SURVIVAL_REWARD = 20.0
-    DEATH_PENALTY = 25.0
+    SURVIVAL_DEATH_PENALTY = 60.0
+    COMBAT_DEATH_PENALTY = 25.0
 
     def __init__(self, render_mode: str | None = None) -> None:
         super().__init__(render_mode=render_mode)
@@ -239,7 +240,12 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
             survival_step_reward = self.SURVIVAL_STEP_REWARD
             reward += survival_step_reward
 
-        death_penalty = self.DEATH_PENALTY if bot_defeated else 0.0
+        configured_death_penalty = (
+            self.SURVIVAL_DEATH_PENALTY
+            if self.survival_mode
+            else self.COMBAT_DEATH_PENALTY
+        )
+        death_penalty = configured_death_penalty if bot_defeated else 0.0
         reward -= death_penalty
 
         tracking_failure = bool(info.get("tracking_failure", False))
