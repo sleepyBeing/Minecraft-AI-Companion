@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from agent.stages.stage_2_stationary_combat import StationaryCombatAction
-from agent.stages.stage_4_retreat import LiveStageFourRetreatEnv
+from agent.stages.stage_4_live import LiveStageFourRetreatEnv
 
 
 BASE_OPTIONS = {
@@ -82,8 +82,49 @@ def run_live_stage_four_preflight(
             "Stage-four preflight failed: approaching cover earned no progress reward."
         )
 
-    _, info = environment.reset(
+    _, planned_info = environment.reset(
         seed=2,
+        options={**BASE_OPTIONS, "bot_health": 20},
+    )
+    protected_position = np.asarray(
+        planned_info["protected_position"], dtype=np.float32
+    ).tolist()
+    _, cover_info = environment.reset(
+        seed=3,
+        options={
+            **BASE_OPTIONS,
+            "bot_health": 20,
+            "bot_position": protected_position,
+        },
+    )
+    if not bool(cover_info["cover_occluded"]):
+        environment.close()
+        raise RuntimeError(
+            "Stage-four preflight failed: the protected position has no solid "
+            "cover between the bot and zombie."
+        )
+    for confirmation_step in range(environment.COVER_CONFIRMATION_STEPS):
+        _, _, terminated, truncated, cover_info = environment.step(
+            int(StationaryCombatAction.WAIT)
+        )
+        if terminated or truncated or not bool(cover_info["cover_occluded"]):
+            environment.close()
+            raise RuntimeError(
+                "Stage-four preflight failed: cover was not maintained during "
+                "confirmation."
+            )
+        should_be_confirmed = (
+            confirmation_step + 1 >= environment.COVER_CONFIRMATION_STEPS
+        )
+        if bool(cover_info["in_cover"]) != should_be_confirmed:
+            environment.close()
+            raise RuntimeError(
+                "Stage-four preflight failed: consecutive cover confirmation "
+                "is inconsistent."
+            )
+
+    _, info = environment.reset(
+        seed=4,
         options={**BASE_OPTIONS, "bot_health": 20},
     )
     if bool(info["survival_mode"]):
@@ -143,6 +184,7 @@ def run_live_stage_four_preflight(
         "Live Stage Four preflight passed: "
         f"retreat_gain={furthest_retreat_distance - distance_before_retreat:.2f}, "
         f"safe_progress={safe_distance_before - float(safe_info['distance_to_safe_position']):.2f}, "
+        f"cover_streak={int(cover_info['cover_streak'])}, "
         f"damage_taken={total_damage_taken:.1f}, "
         f"damage_dealt={float(attack_info['damage_dealt']):.1f}"
     )

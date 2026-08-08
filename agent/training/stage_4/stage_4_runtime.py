@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import argparse
 
-from agent.stages.stage_4_retreat import (
-    LiveStageFourRetreatEnv,
-    StageFourRetreatEnv,
-)
+from agent.stages.stage_4_live import LiveStageFourRetreatEnv
+from agent.stages.stage_4_retreat import StageFourRetreatEnv
 from agent.training.stage_4.stage_4_preflight import run_live_stage_four_preflight
 
 

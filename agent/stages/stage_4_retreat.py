@@ -7,8 +7,13 @@ from typing import Any
 import numpy as np
 from gymnasium import spaces
 
+from agent.stages.stage_4_cover import (
+    COVER_RECTANGLES,
+    choose_cover_plan,
+    is_geometrically_occluded,
+    point_inside_cover,
+)
 from agent.stages.stage_2_stationary_combat import (
-    LiveStageTwoStationaryCombatEnv,
     StationaryCombatAction,
 )
 from agent.stages.stage_3_moving_combat import StageThreeMovingCombatEnv
@@ -19,11 +24,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
     STARTING_HEALTH_OPTIONS = (20.0, 10.0, 5.0)
     SURVIVAL_STARTING_HEALTH_OPTIONS = (10.0, 5.0)
     LOW_HEALTH_THRESHOLD = 10.0
-    COVER_RECTANGLES = (
-        (7.0, 8.0, 2.0, 5.0),
-        (7.0, 8.0, 10.0, 13.0),
-    )
-    SAFE_OFFSET = 1.75
+    COVER_CONFIRMATION_STEPS = 3
 
     RETREAT_PROGRESS_REWARD_SCALE = 1.5
     COVER_PROGRESS_REWARD_SCALE = 1.0
@@ -59,6 +60,8 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         self.starting_bot_health = self.MAX_HEALTH
         self.survival_mode = False
         self.cover_bonus_awarded = False
+        self.cover_streak = 0
+        self.confirmed_in_cover = False
 
     def reset(
         self,
@@ -84,6 +87,8 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         self.bot_health = requested_health
         self.bot_defeated = False
         self.cover_bonus_awarded = False
+        self.cover_streak = 0
+        self.confirmed_in_cover = False
         info.update(self._get_info())
         info.update(
             {
@@ -121,6 +126,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         if self.survival_mode:
             self.target_health = self.ZOMBIE_MAX_HEALTH
             self.target_alive = True
+        self._update_cover_confirmation()
         return self._apply_stage_four_rewards(
             action=action,
             health_before_action=health_before_action,
@@ -181,7 +187,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         ):
             reward -= self.HEALTHY_RETREAT_ACTION_PENALTY
 
-        in_cover_after = self._is_in_cover()
+        in_cover_after = self.confirmed_in_cover
         safe_distance_after = float(
             np.linalg.norm(safe_position_before - self.bot_position)
         )
@@ -285,7 +291,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         else:
             super()._apply_movement_action(action)
 
-        if self._point_inside_cover(self.bot_position):
+        if point_inside_cover(self.bot_position):
             self.bot_position = previous_position
 
     def _move_in_world_direction(self, direction: np.ndarray) -> None:
@@ -314,7 +320,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
             )
             movement = offset / distance * movement_length
             candidate = self.target_position + movement
-            if self._point_inside_cover(candidate):
+            if point_inside_cover(candidate):
                 alternatives = (
                     self.target_position + np.array([movement[0], 0.0]),
                     self.target_position + np.array([0.0, movement[1]]),
@@ -322,7 +328,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
                 valid = [
                     point
                     for point in alternatives
-                    if not self._point_inside_cover(point)
+                    if not point_inside_cover(point)
                 ]
                 if valid:
                     candidate = min(
@@ -338,7 +344,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
             ).astype(np.float32)
 
         if (
-            not self._is_in_cover()
+            not self._raw_cover_occlusion()
             and self._distance()
             <= self.ZOMBIE_ATTACK_RANGE + self.ZOMBIE_ATTACK_RANGE_EPSILON
             and self.elapsed_seconds >= self.next_zombie_attack_time
@@ -361,7 +367,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
                 relative_safe[0],
                 relative_safe[1],
                 safe_distance / (np.sqrt(2.0) * self.ROOM_SIZE),
-                float(self._is_in_cover()),
+                float(self.confirmed_in_cover),
                 float(self.survival_mode),
             ],
             dtype=np.float32,
@@ -370,17 +376,22 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
 
     def _get_info(self) -> dict[str, Any]:
         info = super()._get_info()
-        safe_position = self._nearest_safe_position()
+        plan = self._cover_plan()
+        safe_position = plan.navigation_position
         info.update(
             {
                 "safe_position": safe_position.copy(),
+                "protected_position": plan.protected_position.copy(),
+                "active_cover": plan.cover_index,
                 "distance_to_safe_position": float(
                     np.linalg.norm(safe_position - self.bot_position)
                 ),
                 "starting_bot_health": self.starting_bot_health,
                 "survival_mode": self.survival_mode,
                 "scenario": self._scenario_name(),
-                "in_cover": self._is_in_cover(),
+                "in_cover": self.confirmed_in_cover,
+                "cover_occluded": self._raw_cover_occlusion(),
+                "cover_streak": self.cover_streak,
                 "low_health": self.bot_health <= self.LOW_HEALTH_THRESHOLD,
             }
         )
@@ -391,7 +402,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
 
     def render(self) -> str:
         grid = np.full((15, 15), ".", dtype="<U1")
-        for min_x, max_x, min_z, max_z in self.COVER_RECTANGLES:
+        for min_x, max_x, min_z, max_z in COVER_RECTANGLES:
             grid[
                 int(min_z) : int(max_z),
                 int(min_x) : int(max_x),
@@ -404,163 +415,32 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         return "\n".join("".join(row) for row in grid)
 
     def _nearest_safe_position(self) -> np.ndarray:
-        candidates = [
-            self._safe_point_behind(rectangle)
-            for rectangle in self.COVER_RECTANGLES
-        ]
-        return min(
-            candidates,
-            key=lambda point: float(np.linalg.norm(point - self.bot_position)),
-        ).copy()
+        return self._cover_plan().navigation_position.copy()
 
-    def _safe_point_behind(
-        self, rectangle: tuple[float, float, float, float]
-    ) -> np.ndarray:
-        min_x, max_x, min_z, max_z = rectangle
-        center = np.array(
-            [(min_x + max_x) / 2.0, (min_z + max_z) / 2.0],
-            dtype=np.float32,
+    def _protected_safe_position(self) -> np.ndarray:
+        return self._cover_plan().protected_position.copy()
+
+    def _cover_plan(self):
+        return choose_cover_plan(
+            self.bot_position,
+            self.target_position,
+            room_size=self.ROOM_SIZE,
         )
-        direction = center - self.target_position
-        length = float(np.linalg.norm(direction))
-        if length <= 1e-8:
-            direction = np.array([1.0, 0.0], dtype=np.float32)
+
+    def _raw_cover_occlusion(self) -> bool:
+        return is_geometrically_occluded(
+            self.bot_position,
+            self.target_position,
+        )
+
+    def _is_in_cover(self) -> bool:
+        return self.confirmed_in_cover
+
+    def _update_cover_confirmation(self) -> None:
+        if self._raw_cover_occlusion():
+            self.cover_streak += 1
         else:
-            direction /= length
-        return np.clip(
-            center + direction * self.SAFE_OFFSET,
-            0.5,
-            self.ROOM_SIZE - 0.5,
-        ).astype(np.float32)
-
-    def _is_in_cover(self) -> bool:
-        return any(
-            self._segment_intersects_rectangle(
-                self.bot_position,
-                self.target_position,
-                rectangle,
-            )
-            for rectangle in self.COVER_RECTANGLES
+            self.cover_streak = 0
+        self.confirmed_in_cover = (
+            self.cover_streak >= self.COVER_CONFIRMATION_STEPS
         )
-
-    def _point_inside_cover(self, point: np.ndarray) -> bool:
-        return any(
-            min_x <= point[0] <= max_x and min_z <= point[1] <= max_z
-            for min_x, max_x, min_z, max_z in self.COVER_RECTANGLES
-        )
-
-    @staticmethod
-    def _segment_intersects_rectangle(
-        start: np.ndarray,
-        end: np.ndarray,
-        rectangle: tuple[float, float, float, float],
-    ) -> bool:
-        min_x, max_x, min_z, max_z = rectangle
-        delta = end - start
-        minimum = 0.0
-        maximum = 1.0
-        for origin, change, low, high in (
-            (start[0], delta[0], min_x, max_x),
-            (start[1], delta[1], min_z, max_z),
-        ):
-            if abs(float(change)) < 1e-9:
-                if origin < low or origin > high:
-                    return False
-                continue
-            first = (low - origin) / change
-            second = (high - origin) / change
-            minimum = max(minimum, float(min(first, second)))
-            maximum = min(maximum, float(max(first, second)))
-            if minimum > maximum:
-                return False
-        return True
-
-
-class LiveStageFourRetreatEnv(
-    LiveStageTwoStationaryCombatEnv,
-    StageFourRetreatEnv,
-):
-
-    BRIDGE_STAGE = "stage4"
-    BRIDGE_STAGE_NAME = "stage-four"
-
-    def __init__(
-        self,
-        bridge_url: str = "ws://127.0.0.1:8765",
-        *,
-        bridge_timeout: float = 15.0,
-        render_mode: str | None = None,
-    ) -> None:
-        super().__init__(
-            bridge_url=bridge_url,
-            bridge_timeout=bridge_timeout,
-            render_mode=render_mode,
-        )
-        self.server_safe_position = np.array([7.5, 3.5], dtype=np.float32)
-        self.server_in_cover = False
-
-    def step(
-        self, action: int
-    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        health_before_action = self.bot_health
-        in_cover_before = self._is_in_cover()
-        safe_position_before = self._nearest_safe_position()
-        safe_distance_before = float(
-            np.linalg.norm(safe_position_before - self.bot_position)
-        )
-        observation, reward, terminated, truncated, info = (
-            LiveStageTwoStationaryCombatEnv.step(self, action)
-        )
-        del observation
-
-        damage_taken = max(0.0, health_before_action - self.bot_health)
-        damage_taken_penalty = (
-            damage_taken * self.DAMAGE_TAKEN_PENALTY_SCALE
-        )
-        reward -= damage_taken_penalty
-        bot_defeated = self.bot_defeated or self.bot_health <= 0
-        terminated = terminated or bot_defeated
-        truncated = truncated and not terminated
-        info.update(
-            {
-                "damage_taken": damage_taken,
-                "damage_taken_penalty": damage_taken_penalty,
-                "bot_defeated": bot_defeated,
-            }
-        )
-        return self._apply_stage_four_rewards(
-            action=action,
-            health_before_action=health_before_action,
-            in_cover_before=in_cover_before,
-            safe_position_before=safe_position_before,
-            safe_distance_before=safe_distance_before,
-            reward=reward,
-            terminated=terminated,
-            truncated=truncated,
-            info=info,
-            source="minecraft",
-        )
-
-    def _apply_live_state(self, state: dict[str, Any]) -> None:
-        super()._apply_live_state(state)
-        try:
-            safe_position = np.asarray(state["safePosition"], dtype=np.float32)
-            if safe_position.shape != (2,):
-                raise ValueError("safePosition must contain [x, z]")
-            self.server_safe_position = safe_position
-            self.server_in_cover = bool(state["inCover"])
-            server_survival_mode = bool(state["survivalMode"])
-            if server_survival_mode != self.survival_mode:
-                raise ValueError(
-                    "Mineflayer survival mode does not match the episode mode"
-                )
-        except (KeyError, TypeError, ValueError) as error:
-            raise RuntimeError(
-                f"Invalid stage-four cover state from Mineflayer: {state!r}"
-            ) from error
-
-    def _nearest_safe_position(self) -> np.ndarray:
-        return self.server_safe_position.copy()
-
-    def _is_in_cover(self) -> bool:
-        return self.server_in_cover

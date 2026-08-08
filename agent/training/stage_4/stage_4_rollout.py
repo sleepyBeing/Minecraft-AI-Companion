@@ -91,6 +91,8 @@ def collect_stage_four_rollout(
         "wait_actions",
         "low_health_steps",
         "survival_mode_steps",
+        "cover_occluded_steps",
+        "cover_streaks",
         "cover_steps",
         "cover_entries",
         "retreat_rewards",
@@ -130,6 +132,7 @@ def collect_stage_four_rollout(
         wait_action = action == int(StationaryCombatAction.WAIT)
         low_health = bool(info["low_health"])
         survival_mode = bool(info["survival_mode"])
+        cover_occluded = bool(info["cover_occluded"])
         in_cover = bool(info["in_cover"])
         cover_reward = float(info["cover_reward"])
 
@@ -158,6 +161,8 @@ def collect_stage_four_rollout(
             "wait_actions": float(wait_action),
             "low_health_steps": float(low_health),
             "survival_mode_steps": float(survival_mode),
+            "cover_occluded_steps": float(cover_occluded),
+            "cover_streaks": float(info["cover_streak"]),
             "cover_steps": float(in_cover),
             "cover_entries": float(cover_reward > 0),
             "retreat_rewards": float(info["retreat_progress_reward"]),

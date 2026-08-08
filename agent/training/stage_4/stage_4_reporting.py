@@ -88,6 +88,12 @@ def write_rollout_summaries(
                 rollout["survival_mode_steps"]
             ),
             "retreat/mean_progress_reward": np.mean(rollout["retreat_rewards"]),
+            "cover/raw_occluded_fraction": np.mean(
+                rollout["cover_occluded_steps"]
+            ),
+            "cover/mean_confirmation_streak": np.mean(
+                rollout["cover_streaks"]
+            ),
             "cover/covered_fraction": np.mean(rollout["cover_steps"]),
             "cover/entries": np.sum(rollout["cover_entries"]),
             "cover/mean_progress_reward": np.mean(
@@ -134,6 +140,7 @@ def print_rollout(
         f"safe={int(np.sum(rollout['safe_area_actions']))} "
         f"cover_progress={np.sum(rollout['cover_progress_rewards']):+.1f} "
         f"cover_entries={int(np.sum(rollout['cover_entries']))} "
+        f"occluded={np.mean(rollout['cover_occluded_steps']):.1%} "
         f"covered={np.mean(rollout['cover_steps']):.1%} "
         f"low_health={np.mean(rollout['low_health_steps']):.1%} "
         f"survival_mode={np.mean(rollout['survival_mode_steps']):.1%} "

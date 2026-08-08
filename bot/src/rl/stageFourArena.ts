@@ -1,21 +1,13 @@
 import type { Bot } from "mineflayer";
 import { StageTwoArena } from "./stageTwoArena.js";
+import {
+  chooseCoverPlan,
+  hasSolidBlockBetween,
+  isGeometricallyBlocked,
+  retreatPoint,
+  type Point
+} from "./stageFourCover.js";
 import type { BridgeRequest } from "./shared.js";
-
-type Point = [number, number];
-
-interface CoverRectangle {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-}
-
-const COVER_RECTS: CoverRectangle[] = [
-  { minX: 7, maxX: 8, minZ: 2, maxZ: 5 },
-  { minX: 7, maxX: 8, minZ: 10, maxZ: 13 }
-];
-const SAFE_OFFSET = 1.75;
 
 /** Moving-zombie arena with low-health retreat and solid cover mechanics. */
 export class StageFourArena extends StageTwoArena {
@@ -48,12 +40,24 @@ export class StageFourArena extends StageTwoArena {
     const state = super.observe();
     const botPosition = state.botPosition as Point;
     const targetPosition = state.targetPosition as Point;
-    const safePosition = nearestSafePosition(botPosition, targetPosition);
+    const plan = chooseCoverPlan(botPosition, targetPosition);
+    const target = this.getTargetEntity();
+    const geometricallyBlocked = isGeometricallyBlocked(
+      botPosition,
+      targetPosition
+    );
+    const blockLineOfSight = target
+      ? hasSolidBlockBetween(this.bot, target)
+      : false;
+    const coverOccluded = geometricallyBlocked && blockLineOfSight;
     return {
       ...state,
-      safePosition,
-      distanceToSafe: distance(botPosition, safePosition),
-      inCover: isLineBlocked(botPosition, targetPosition),
+      safePosition: plan.navigationPosition,
+      protectedPosition: plan.protectedPosition,
+      activeCover: plan.coverIndex,
+      distanceToSafe: distance(botPosition, plan.navigationPosition),
+      coverOccluded,
+      inCover: coverOccluded,
       survivalMode: this.survivalMode
     };
   }
@@ -78,10 +82,10 @@ export class StageFourArena extends StageTwoArena {
       target.position.x - this.origin.x,
       target.position.z - this.origin.z
     ];
-    const destination =
+    const destination: Point =
       action === 8
         ? retreatPoint(botPosition, targetPosition)
-        : nearestSafePosition(botPosition, targetPosition);
+        : chooseCoverPlan(botPosition, targetPosition).navigationPosition;
     const dx = destination[0] - botPosition[0];
     const dz = destination[1] - botPosition[1];
     if (Math.hypot(dx, dz) <= 0.1) return true;
@@ -96,80 +100,14 @@ export class StageFourArena extends StageTwoArena {
     if (!this.origin) throw new Error("Stage-four arena origin is unavailable");
     const { x, y, z } = this.origin;
     await this.command(
-      `fill ${x + 7} ${y + 1} ${z + 2} ${x + 7} ${y + 2} ${z + 4} smooth_stone`
+      `fill ${x + 7} ${y + 1} ${z + 1} ${x + 7} ${y + 2} ${z + 5} smooth_stone`
     );
     await this.command(
-      `fill ${x + 7} ${y + 1} ${z + 10} ${x + 7} ${y + 2} ${z + 12} smooth_stone`
+      `fill ${x + 7} ${y + 1} ${z + 9} ${x + 7} ${y + 2} ${z + 13} smooth_stone`
     );
   }
-}
-
-function nearestSafePosition(bot: Point, target: Point): Point {
-  return COVER_RECTS
-    .map((cover) => safePointBehind(cover, target))
-    .sort((a, b) => distance(bot, a) - distance(bot, b))[0];
-}
-
-function safePointBehind(cover: CoverRectangle, target: Point): Point {
-  const center: Point = [
-    (cover.minX + cover.maxX) / 2,
-    (cover.minZ + cover.maxZ) / 2
-  ];
-  let dx = center[0] - target[0];
-  let dz = center[1] - target[1];
-  const length = Math.hypot(dx, dz) || 1;
-  dx /= length;
-  dz /= length;
-  return [
-    clamp(center[0] + dx * SAFE_OFFSET, 0.5, 14.5),
-    clamp(center[1] + dz * SAFE_OFFSET, 0.5, 14.5)
-  ];
-}
-
-function retreatPoint(bot: Point, target: Point): Point {
-  let dx = bot[0] - target[0];
-  let dz = bot[1] - target[1];
-  const length = Math.hypot(dx, dz) || 1;
-  dx /= length;
-  dz /= length;
-  return [clamp(bot[0] + dx, 0.5, 14.5), clamp(bot[1] + dz, 0.5, 14.5)];
-}
-
-function isLineBlocked(start: Point, end: Point): boolean {
-  return COVER_RECTS.some((cover) => segmentIntersectsRectangle(start, end, cover));
-}
-
-function segmentIntersectsRectangle(
-  start: Point,
-  end: Point,
-  rectangle: CoverRectangle
-): boolean {
-  const dx = end[0] - start[0];
-  const dz = end[1] - start[1];
-  let minimum = 0;
-  let maximum = 1;
-
-  for (const [origin, delta, low, high] of [
-    [start[0], dx, rectangle.minX, rectangle.maxX],
-    [start[1], dz, rectangle.minZ, rectangle.maxZ]
-  ] as const) {
-    if (Math.abs(delta) < 1e-9) {
-      if (origin < low || origin > high) return false;
-      continue;
-    }
-    const first = (low - origin) / delta;
-    const second = (high - origin) / delta;
-    minimum = Math.max(minimum, Math.min(first, second));
-    maximum = Math.min(maximum, Math.max(first, second));
-    if (minimum > maximum) return false;
-  }
-  return true;
 }
 
 function distance(first: Point, second: Point): number {
   return Math.hypot(first[0] - second[0], first[1] - second[1]);
-}
-
-function clamp(value: number, low: number, high: number): number {
-  return Math.min(high, Math.max(low, value));
 }
