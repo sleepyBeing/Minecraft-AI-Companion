@@ -65,6 +65,7 @@ def write_rollout_summaries(
     step: int,
 ) -> None:
     write_training_summaries(tf, summary_writer, metrics, rollout, step)
+    survival_steps = max(1.0, float(np.sum(rollout["survival_mode_steps"])))
     with summary_writer.as_default():
         for name, value in {
             "combat/mean_damage_dealt_per_step": np.mean(rollout["damage_dealt"]),
@@ -91,10 +92,19 @@ def write_rollout_summaries(
             "cover/raw_occluded_fraction": np.mean(
                 rollout["cover_occluded_steps"]
             ),
+            "cover/survival_raw_occluded_fraction": np.sum(
+                rollout["cover_occluded_steps"]
+                * rollout["survival_mode_steps"]
+            )
+            / survival_steps,
             "cover/mean_confirmation_streak": np.mean(
                 rollout["cover_streaks"]
             ),
             "cover/covered_fraction": np.mean(rollout["cover_steps"]),
+            "cover/survival_confirmed_fraction": np.sum(
+                rollout["cover_steps"] * rollout["survival_mode_steps"]
+            )
+            / survival_steps,
             "cover/entries": np.sum(rollout["cover_entries"]),
             "cover/mean_progress_reward": np.mean(
                 rollout["cover_progress_rewards"]
@@ -105,6 +115,9 @@ def write_rollout_summaries(
             "cover/total_reward": np.sum(rollout["cover_rewards"]),
             "cover/maintenance_reward": np.sum(
                 rollout["cover_maintenance_rewards"]
+            ),
+            "cover/abandonment_penalties": np.sum(
+                rollout["cover_abandonment_penalties"]
             ),
             "outcome/survival_step_rewards": np.sum(
                 rollout["survival_step_rewards"]

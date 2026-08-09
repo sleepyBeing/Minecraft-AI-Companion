@@ -12,11 +12,21 @@ import {
   TARGET_REACQUIRE_TIMEOUT_MS,
   TURN_RADIANS,
   distanceBetween,
-  parseCoordinate,
   sleep,
   validatePosition
 } from "./shared.js";
 import type { ArenaOrigin, BridgeRequest } from "./shared.js";
+import {
+  TargetHealthReader,
+  buildCombatArena,
+  clearCombatArenaEntities,
+  createArenaOrigin,
+  createEmptyAttackResult,
+  sanitizeCombatArena,
+  validateStartingHealth,
+  waitForBotReady,
+  waitForInventoryItem
+} from "./stageTwoSupport.js";
 
 export interface CombatArenaOptions {
   stageName: string;
@@ -44,13 +54,19 @@ export class StageTwoArena {
   private elapsedSeconds = 0;
   private nextAttackTime = 0;
   private pendingAttackUntil = 0;
-  private healthObjectiveReady = false;
+  private readonly healthReader: TargetHealthReader;
   private lastActionResult = createEmptyAttackResult();
 
   constructor(
     protected readonly bot: Bot,
     protected readonly options: CombatArenaOptions = STAGE_TWO_OPTIONS
   ) {
+    this.healthReader = new TargetHealthReader(
+      bot,
+      options.healthObjective,
+      options.targetTag,
+      (command) => this.command(command)
+    );
     bot.on("entityHurt", (entity) => {
       if (!entity || entity.id !== this.targetEntityId) return;
       if (entity.health !== undefined && entity.health !== null)
@@ -79,7 +95,7 @@ export class StageTwoArena {
   }
 
   async reset(request: BridgeRequest) {
-    await this.waitForBotReady();
+    await waitForBotReady(this.bot, this.options.stageName);
     const botPosition = validatePosition(request.botPosition ?? [4.5, 7.5], "botPosition");
     const targetPosition = validatePosition(
       request.targetPosition ?? [10.5, 7.5],
@@ -91,9 +107,13 @@ export class StageTwoArena {
 
     const yaw = Number.isFinite(request.botYaw) ? request.botYaw! : 0;
     const botHealth = validateStartingHealth(request.botHealth ?? 20);
-    if (!this.origin) this.origin = this.createOrigin();
-    if (!this.arenaBuilt || request.rebuildArena) await this.buildArena();
-    else await this.sanitizeArena();
+    if (!this.origin) this.origin = createArenaOrigin(this.bot);
+    if (!this.arenaBuilt || request.rebuildArena) {
+      await buildCombatArena((command) => this.command(command), this.origin);
+      this.arenaBuilt = true;
+    } else {
+      await sanitizeCombatArena((command) => this.command(command), this.origin);
+    }
 
     this.bot.clearControlStates();
     this.bot.pathfinder.setGoal(null);
@@ -122,13 +142,16 @@ export class StageTwoArena {
     await this.command(
       `kill @e[type=minecraft:zombie,tag=${this.options.targetTag}]`
     );
-    await this.clearArenaEntities();
+    await clearCombatArenaEntities(
+      (command) => this.command(command),
+      this.origin
+    );
     await this.command("give @s minecraft:iron_sword 1");
 
-    let ironSword = await this.waitForInventoryItem("iron_sword", 2_000);
+    let ironSword = await waitForInventoryItem(this.bot, "iron_sword", 2_000);
     if (!ironSword) {
       await this.command("give @s minecraft:iron_sword 1");
-      ironSword = await this.waitForInventoryItem("iron_sword", 2_000);
+      ironSword = await waitForInventoryItem(this.bot, "iron_sword", 2_000);
     }
     if (!ironSword) {
       throw new Error(
@@ -175,8 +198,8 @@ export class StageTwoArena {
       throw new Error("The stage-two zombie did not spawn. Ensure difficulty is not peaceful.");
     this.targetEntityId = targetEntity.id;
     this.lastKnownTargetHealth = targetEntity.health ?? 20;
-    await this.ensureHealthObjective();
-    const serverHealth = await this.queryTargetHealthFromServer();
+    await this.healthReader.ensureObjective();
+    const serverHealth = await this.healthReader.query(this.targetConfirmedDead);
     if (serverHealth !== null) this.lastKnownTargetHealth = serverHealth;
 
     const resetDistance = Math.hypot(
@@ -190,6 +213,8 @@ export class StageTwoArena {
   }
 
   async step(action: number) {
+    const actionStartedAt = Date.now();
+    let actionDurationMs = ACTION_DURATION_MS;
     this.bot.clearControlStates();
     this.lastActionResult = createEmptyAttackResult();
     try {
@@ -277,7 +302,9 @@ export class StageTwoArena {
               this.nextAttackTime =
                 this.elapsedSeconds + IRON_SWORD_COOLDOWN_SECONDS;
               await this.waitForAttackResult(healthBeforeAttack);
-              const serverHealth = await this.queryTargetHealthFromServer();
+              const serverHealth = await this.healthReader.query(
+                this.targetConfirmedDead
+              );
               if (serverHealth !== null) {
                 this.lastActionResult.serverHealthVerified = true;
                 this.lastKnownTargetHealth = serverHealth;
@@ -292,9 +319,13 @@ export class StageTwoArena {
           }
           break;
         }
-        default:
-          if (!(await this.handleExtendedAction(action)))
+        default: {
+          const extendedDuration = await this.handleExtendedAction(action);
+          if (extendedDuration === false)
             throw new Error(`${this.options.stageName} does not support action ${action}`);
+          actionDurationMs = Math.max(ACTION_DURATION_MS, extendedDuration);
+          break;
+        }
       }
 
       // Tracking can disappear during any action, not only ATTACK. Give
@@ -309,12 +340,13 @@ export class StageTwoArena {
       ) {
         this.lastActionResult.targetMissing = true;
       }
-      await sleep(ACTION_DURATION_MS);
+      const remainingDuration = actionDurationMs - (Date.now() - actionStartedAt);
+      if (remainingDuration > 0) await sleep(remainingDuration);
     } finally {
       this.bot.clearControlStates();
     }
 
-    this.elapsedSeconds += ACTION_DURATION_MS / 1_000;
+    this.elapsedSeconds += actionDurationMs / 1_000;
     return this.observe();
   }
 
@@ -365,7 +397,7 @@ export class StageTwoArena {
     };
   }
 
-  protected async handleExtendedAction(_action: number): Promise<boolean> {
+  protected async handleExtendedAction(_action: number): Promise<number | false> {
     return false;
   }
 
@@ -462,77 +494,6 @@ export class StageTwoArena {
     return false;
   }
 
-  private async ensureHealthObjective(): Promise<void> {
-    if (this.healthObjectiveReady) return;
-    await this.command(
-      `scoreboard objectives add ${this.options.healthObjective} dummy`
-    );
-    this.healthObjectiveReady = true;
-  }
-
-  /**
-   * Read the zombie's actual NBT health through
-   * a scoreboard so rewards are based on server state rather than client
-   * metadata.
-   */
-  private async queryTargetHealthFromServer(): Promise<number | null> {
-    if (this.targetConfirmedDead) return 0;
-    await this.ensureHealthObjective();
-    // A missing entity must not reuse the previous zombie's score.
-    await this.command(
-      `scoreboard players set #target ${this.options.healthObjective} -1`
-    );
-    await this.command(
-      `execute store result score #target ${this.options.healthObjective} ` +
-      "run data get entity " +
-      `@e[type=minecraft:zombie,tag=${this.options.targetTag},limit=1] Health 100`
-    );
-
-    return new Promise<number | null>((resolve) => {
-      let settled = false;
-      const finish = (health: number | null) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        this.bot.off("messagestr", onMessage);
-        resolve(health);
-      };
-      const onMessage = (message: string) => {
-        if (!message.includes(this.options.healthObjective)) return;
-        const match = message.match(/#target has (-?\d+)/);
-        if (match) {
-          const storedHealth = Number(match[1]);
-          finish(storedHealth < 0 ? null : storedHealth / 100);
-        }
-      };
-      const timeout = setTimeout(() => finish(null), 750);
-      this.bot.on("messagestr", onMessage);
-      this.bot.chat(
-        `/scoreboard players get #target ${this.options.healthObjective}`
-      );
-    });
-  }
-
-  private async waitForBotReady(): Promise<void> {
-    const deadline = Date.now() + 5_000;
-    while (this.bot.health <= 0 && Date.now() < deadline) await sleep(50);
-    if (this.bot.health <= 0) {
-      throw new Error(
-        `${this.options.stageName} reset timed out waiting for the bot to respawn.`
-      );
-    }
-  }
-
-  private async waitForInventoryItem(name: string, timeoutMs: number) {
-    const deadline = Date.now() + timeoutMs;
-    do {
-      const item = this.bot.inventory.items().find((entry) => entry.name === name);
-      if (item) return item;
-      await sleep(50);
-    } while (Date.now() < deadline);
-    return null;
-  }
-
   private horizontalDistanceTo(x: number, z: number): number {
     return Math.hypot(this.bot.entity.position.x - x, this.bot.entity.position.z - z);
   }
@@ -540,50 +501,6 @@ export class StageTwoArena {
   private horizontalDistanceToWorldTarget(): number {
     const target = this.worldPosition(this.targetPosition);
     return this.horizontalDistanceTo(target.x, target.z);
-  }
-
-  private createOrigin(): ArenaOrigin {
-    const configuredX = parseCoordinate(process.env.RL_ARENA_X);
-    const configuredY = parseCoordinate(process.env.RL_ARENA_Y);
-    const configuredZ = parseCoordinate(process.env.RL_ARENA_Z);
-    return {
-      x: configuredX ?? Math.floor(this.bot.entity.position.x) - 7,
-      y: configuredY ?? Math.floor(this.bot.entity.position.y) - 1,
-      z: configuredZ ?? Math.floor(this.bot.entity.position.z) - 7
-    };
-  }
-
-  private async buildArena(): Promise<void> {
-    if (!this.origin) throw new Error("Arena origin is unavailable");
-    const { x, y, z } = this.origin;
-    await this.command(`fill ${x - 1} ${y} ${z - 1} ${x + 15} ${y + 4} ${z + 15} air`);
-    await this.command(`fill ${x} ${y} ${z} ${x + 14} ${y} ${z + 14} smooth_stone`);
-    await this.command(`fill ${x - 1} ${y} ${z - 1} ${x - 1} ${y + 3} ${z + 15} glass`);
-    await this.command(`fill ${x + 15} ${y} ${z - 1} ${x + 15} ${y + 3} ${z + 15} glass`);
-    await this.command(`fill ${x} ${y} ${z - 1} ${x + 14} ${y + 3} ${z - 1} glass`);
-    await this.command(`fill ${x} ${y} ${z + 15} ${x + 14} ${y + 3} ${z + 15} glass`);
-    await this.command(
-      `fill ${x - 1} ${y + 4} ${z - 1} ${x + 15} ${y + 4} ${z + 15} sea_lantern`
-    );
-    this.arenaBuilt = true;
-  }
-
-  private async sanitizeArena(): Promise<void> {
-    if (!this.origin) throw new Error("Arena origin is unavailable");
-    const { x, y, z } = this.origin;
-    await this.command(`fill ${x} ${y + 1} ${z} ${x + 14} ${y + 3} ${z + 14} air`);
-    await this.command(`fill ${x} ${y} ${z} ${x + 14} ${y} ${z + 14} smooth_stone`);
-    await this.command(
-      `fill ${x - 1} ${y + 4} ${z - 1} ${x + 15} ${y + 4} ${z + 15} sea_lantern`
-    );
-  }
-
-  private async clearArenaEntities(): Promise<void> {
-    if (!this.origin) throw new Error("Arena origin is unavailable");
-    const { x, y, z } = this.origin;
-    await this.command(
-      `kill @e[x=${x},y=${y + 1},z=${z},dx=14,dy=3,dz=14,type=!minecraft:player]`
-    );
   }
 
   protected worldPosition(local: [number, number]) {
@@ -595,27 +512,4 @@ export class StageTwoArena {
     this.bot.chat(`/${command}`);
     await sleep(75);
   }
-}
-
-function validateStartingHealth(value: number): number {
-  if (![5, 10, 20].includes(value))
-    throw new Error("botHealth must be one of 5, 10, or 20");
-  return value;
-}
-
-function createEmptyAttackResult() {
-  return {
-    attackSelected: false,
-    validAttackAttempt: false,
-    outOfRange: false,
-    cooldownBlocked: false,
-    attackLanded: false,
-    confirmedKill: false,
-    attackDistance: null as number | null,
-    serverHealthVerified: false,
-    movementSettled: false,
-    movementNotSettled: false,
-    targetMissing: false,
-    attackPacketSent: false
-  };
 }

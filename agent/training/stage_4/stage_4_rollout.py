@@ -99,6 +99,7 @@ def collect_stage_four_rollout(
         "cover_progress_rewards",
         "cover_rewards",
         "cover_maintenance_rewards",
+        "cover_abandonment_penalties",
         "survival_step_rewards",
         "survival_attack_penalties",
         "survival_rewards",
@@ -170,6 +171,9 @@ def collect_stage_four_rollout(
             "cover_rewards": cover_reward,
             "cover_maintenance_rewards": float(
                 info["cover_maintenance_reward"]
+            ),
+            "cover_abandonment_penalties": float(
+                info["cover_abandonment_penalty"]
             ),
             "survival_step_rewards": float(info["survival_step_reward"]),
             "survival_attack_penalties": float(

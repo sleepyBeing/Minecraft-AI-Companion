@@ -47,11 +47,19 @@ class LiveStageFourRetreatEnv(
         safe_distance_before = float(
             np.linalg.norm(safe_position_before - self.bot_position)
         )
+        elapsed_before_action = self.elapsed_seconds
         observation, reward, terminated, truncated, info = (
             LiveStageTwoStationaryCombatEnv.step(self, action)
         )
         del observation
         self._update_cover_confirmation()
+        action_duration_steps = max(
+            1,
+            round(
+                (self.elapsed_seconds - elapsed_before_action)
+                / self.STEP_SECONDS
+            ),
+        )
 
         damage_taken = max(0.0, health_before_action - self.bot_health)
         damage_taken_penalty = damage_taken * self.DAMAGE_TAKEN_PENALTY_SCALE
@@ -77,6 +85,7 @@ class LiveStageFourRetreatEnv(
             truncated=truncated,
             info=info,
             source="minecraft",
+            action_duration_steps=action_duration_steps,
         )
 
     def _apply_live_state(self, state: dict[str, Any]) -> None:

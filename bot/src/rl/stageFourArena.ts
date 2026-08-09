@@ -1,13 +1,23 @@
 import type { Bot } from "mineflayer";
 import { StageTwoArena } from "./stageTwoArena.js";
 import {
+  ACTION_DURATION_MS,
+  sleep,
+  type BridgeRequest
+} from "./shared.js";
+import {
   chooseCoverPlan,
   hasSolidBlockBetween,
   isGeometricallyBlocked,
   retreatPoint,
   type Point
 } from "./stageFourCover.js";
-import type { BridgeRequest } from "./shared.js";
+
+const SAFE_AREA_COMMITMENT_MS = 750;
+const SAFE_AREA_REPLAN_MS = 75;
+const SAFE_AREA_STUCK_MS = 350;
+const SAFE_AREA_MIN_MOVEMENT = 0.08;
+const COVER_SETTLED_SAMPLES = 3;
 
 /** Moving-zombie arena with low-health retreat and solid cover mechanics. */
 export class StageFourArena extends StageTwoArena {
@@ -68,11 +78,15 @@ export class StageFourArena extends StageTwoArena {
     await this.command("effect give @s minecraft:instant_health 1 255 true");
   }
 
-  protected override async handleExtendedAction(action: number): Promise<boolean> {
+  protected override async handleExtendedAction(
+    action: number
+  ): Promise<number | false> {
     if (action !== 8 && action !== 9) return false;
 
     const target = this.getTargetEntity();
-    if (!target || !this.origin) return true;
+    if (!target || !this.origin) return ACTION_DURATION_MS;
+
+    if (action === 9) return this.followDynamicCover();
 
     const botPosition: Point = [
       this.bot.entity.position.x - this.origin.x,
@@ -82,18 +96,75 @@ export class StageFourArena extends StageTwoArena {
       target.position.x - this.origin.x,
       target.position.z - this.origin.z
     ];
-    const destination: Point =
-      action === 8
-        ? retreatPoint(botPosition, targetPosition)
-        : chooseCoverPlan(botPosition, targetPosition).navigationPosition;
+    const destination = retreatPoint(botPosition, targetPosition);
     const dx = destination[0] - botPosition[0];
     const dz = destination[1] - botPosition[1];
-    if (Math.hypot(dx, dz) <= 0.1) return true;
+    if (Math.hypot(dx, dz) <= 0.1) return ACTION_DURATION_MS;
 
     const yaw = Math.atan2(-dx, -dz);
     await this.bot.look(yaw, 0, true);
     this.bot.setControlState("forward", true);
-    return true;
+    return ACTION_DURATION_MS;
+  }
+
+  private async followDynamicCover(): Promise<number> {
+    const startedAt = Date.now();
+    const deadline = startedAt + SAFE_AREA_COMMITMENT_MS;
+    let movementAnchor = this.currentBotPosition();
+    let movementAnchorAt = startedAt;
+    let occludedSamples = 0;
+
+    while (Date.now() < deadline && this.bot.health > 0) {
+      const target = this.getTargetEntity();
+      if (!target || !this.origin) break;
+
+      const botPosition = this.currentBotPosition();
+      const targetPosition: Point = [
+        target.position.x - this.origin.x,
+        target.position.z - this.origin.z
+      ];
+      const occluded =
+        isGeometricallyBlocked(botPosition, targetPosition) &&
+        hasSolidBlockBetween(this.bot, target);
+      occludedSamples = occluded ? occludedSamples + 1 : 0;
+      if (occludedSamples >= COVER_SETTLED_SAMPLES) break;
+
+      const moved = distance(botPosition, movementAnchor);
+      if (moved >= SAFE_AREA_MIN_MOVEMENT) {
+        movementAnchor = botPosition;
+        movementAnchorAt = Date.now();
+      } else if (Date.now() - movementAnchorAt >= SAFE_AREA_STUCK_MS) {
+        break;
+      }
+
+      const destination = chooseCoverPlan(
+        botPosition,
+        targetPosition
+      ).navigationPosition;
+      const dx = destination[0] - botPosition[0];
+      const dz = destination[1] - botPosition[1];
+      if (Math.hypot(dx, dz) <= 0.1) {
+        this.bot.clearControlStates();
+      } else {
+        await this.bot.look(Math.atan2(-dx, -dz), 0, true);
+        this.bot.setControlState("forward", true);
+      }
+      await sleep(SAFE_AREA_REPLAN_MS);
+    }
+
+    this.bot.clearControlStates();
+    return Math.max(
+      ACTION_DURATION_MS,
+      Math.min(SAFE_AREA_COMMITMENT_MS, Date.now() - startedAt)
+    );
+  }
+
+  private currentBotPosition(): Point {
+    if (!this.origin) return [0, 0];
+    return [
+      this.bot.entity.position.x - this.origin.x,
+      this.bot.entity.position.z - this.origin.z
+    ];
   }
 
   private async buildCover(): Promise<void> {

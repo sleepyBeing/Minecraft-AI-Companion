@@ -13,6 +13,7 @@ from agent.stages.stage_4_cover import (
     is_geometrically_occluded,
     point_inside_cover,
 )
+from agent.stages.stage_4_rewards import bounded_positive_reward
 from agent.stages.stage_2_stationary_combat import (
     StationaryCombatAction,
 )
@@ -25,11 +26,14 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
     SURVIVAL_STARTING_HEALTH_OPTIONS = (10.0, 5.0)
     LOW_HEALTH_THRESHOLD = 10.0
     COVER_CONFIRMATION_STEPS = 3
+    SAFE_AREA_COMMITMENT_STEPS = 7
 
     RETREAT_PROGRESS_REWARD_SCALE = 1.5
     COVER_PROGRESS_REWARD_SCALE = 1.0
-    COVER_DISCOVERY_REWARD = 3.0
-    COVER_MAINTENANCE_REWARD = 0.02
+    COVER_PROGRESS_REWARD_CAP = 6.0
+    COVER_DISCOVERY_REWARD = 5.0
+    COVER_MAINTENANCE_REWARD = 0.05
+    COVER_ABANDONMENT_PENALTY = 1.0
     HEALTHY_COVER_REWARD = 0.5
     HEALTHY_RETREAT_ACTION_PENALTY = 0.05
     SURVIVAL_STEP_REWARD = 0.02
@@ -61,6 +65,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         self.starting_bot_health = self.MAX_HEALTH
         self.survival_mode = False
         self.cover_bonus_awarded = False
+        self.cover_progress_reward_earned = 0.0
         self.cover_streak = 0
         self.confirmed_in_cover = False
 
@@ -88,6 +93,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         self.bot_health = requested_health
         self.bot_defeated = False
         self.cover_bonus_awarded = False
+        self.cover_progress_reward_earned = 0.0
         self.cover_streak = 0
         self.confirmed_in_cover = False
         info.update(self._get_info())
@@ -101,6 +107,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
                 "cover_distance_change": 0.0,
                 "cover_reward": 0.0,
                 "cover_maintenance_reward": 0.0,
+                "cover_abandonment_penalty": 0.0,
                 "survival_step_reward": 0.0,
                 "survival_attack_penalty": 0.0,
                 "survival_reward": 0.0,
@@ -119,14 +126,37 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         safe_distance_before = float(
             np.linalg.norm(safe_position_before - self.bot_position)
         )
+        target_distance_before = self._distance()
         if self.survival_mode:
             self.target_health = self.ZOMBIE_MAX_HEALTH
             self.target_alive = True
-        observation, reward, terminated, truncated, info = super().step(action)
-        del observation
-        if self.survival_mode:
-            self.target_health = self.ZOMBIE_MAX_HEALTH
-            self.target_alive = True
+        substeps = (
+            self.SAFE_AREA_COMMITMENT_STEPS
+            if action == int(StationaryCombatAction.MOVE_TO_SAFE_AREA)
+            else 1
+        )
+        reward = 0.0
+        terminated = False
+        truncated = False
+        info: dict[str, Any] = {}
+        executed_substeps = 0
+        for _ in range(substeps):
+            observation, substep_reward, terminated, truncated, info = (
+                super().step(action)
+            )
+            executed_substeps += 1
+            del observation
+            reward += substep_reward
+            if self.survival_mode:
+                self.target_health = self.ZOMBIE_MAX_HEALTH
+                self.target_alive = True
+            if terminated or truncated:
+                break
+        total_distance_change = target_distance_before - self._distance()
+        info["distance_change"] = total_distance_change
+        info["approach_reward"] = (
+            total_distance_change * self.APPROACH_REWARD_SCALE
+        )
         self._update_cover_confirmation()
         return self._apply_stage_four_rewards(
             action=action,
@@ -139,6 +169,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
             truncated=truncated,
             info=info,
             source="simulation",
+            action_duration_steps=executed_substeps,
         )
 
     def _apply_stage_four_rewards(
@@ -154,10 +185,13 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
         truncated: bool,
         info: dict[str, Any],
         source: str,
+        action_duration_steps: int,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         low_health = health_before_action <= self.LOW_HEALTH_THRESHOLD
         retreat_progress_reward = 0.0
         survival_attack_penalty = 0.0
+        if source == "minecraft" and action_duration_steps > 1:
+            reward -= (action_duration_steps - 1) * self.TIME_PENALTY
 
         if self.survival_mode:
             # Survival episodes cannot obtain positive return from the inherited Stage Three combat objective
@@ -200,13 +234,18 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
                 and cover_distance_change > 0.0
                 and retreat_progress_reward < 0.0
             ):
-                # Moving laterally toward cover can temporarily let the
-                # pursuing zombie close the gap. Do not punish a successful
-                # safe-area step for that expected geometric tradeoff.
                 reward -= retreat_progress_reward
                 retreat_progress_reward = 0.0
-            cover_progress_reward = (
+            uncapped_cover_progress_reward = (
                 cover_distance_change * self.COVER_PROGRESS_REWARD_SCALE
+            )
+            (
+                cover_progress_reward,
+                self.cover_progress_reward_earned,
+            ) = bounded_positive_reward(
+                uncapped_cover_progress_reward,
+                self.cover_progress_reward_earned,
+                self.COVER_PROGRESS_REWARD_CAP,
             )
             reward += cover_progress_reward
 
@@ -225,6 +264,17 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
             self.cover_bonus_awarded = True
 
         bot_defeated = bool(info.get("bot_defeated", False))
+        cover_abandonment_penalty = 0.0
+        if (
+            low_health
+            and in_cover_before
+            and not in_cover_after
+            and self.target_alive
+            and not bot_defeated
+        ):
+            cover_abandonment_penalty = self.COVER_ABANDONMENT_PENALTY
+            reward -= cover_abandonment_penalty
+
         cover_maintenance_reward = 0.0
         if (
             low_health
@@ -237,7 +287,9 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
 
         survival_step_reward = 0.0
         if self.survival_mode and self.target_alive and not bot_defeated:
-            survival_step_reward = self.SURVIVAL_STEP_REWARD
+            survival_step_reward = (
+                self.SURVIVAL_STEP_REWARD * action_duration_steps
+            )
             reward += survival_step_reward
 
         configured_death_penalty = (
@@ -276,6 +328,7 @@ class StageFourRetreatEnv(StageThreeMovingCombatEnv):
                 "cover_distance_change": cover_distance_change,
                 "cover_reward": cover_reward,
                 "cover_maintenance_reward": cover_maintenance_reward,
+                "cover_abandonment_penalty": cover_abandonment_penalty,
                 "survival_step_reward": survival_step_reward,
                 "survival_attack_penalty": survival_attack_penalty,
                 "survival_reward": survival_reward,
