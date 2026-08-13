@@ -43,21 +43,32 @@ export class StageFiveArena extends StageFourArena {
     this.hasRecovered = false;
     this.eatResult = emptyEatResult();
     await super.reset({ ...request, botHealth: 20 });
-    await this.command("attribute @s minecraft:max_health base set 20");
-    await this.command("gamerule naturalRegeneration true");
-    await this.prepareHungerForEating();
-    await this.command(`damage @s ${20 - STARTING_HEALTH} minecraft:generic`);
-    await sleep(150);
-    await this.command(`give @s minecraft:${FOOD_NAME} ${FOOD_COUNT}`);
-    await sleep(150);
-    await this.equipSword();
-    if (Math.abs(this.bot.health - STARTING_HEALTH) > 0.75)
-      throw new Error(
-        `Stage-five health setup failed: expected 15, observed ${this.bot.health}`
-      );
-    if (this.foodCount() < FOOD_COUNT)
-      throw new Error("Stage-five steaks were not received; ensure the bot is operator");
-    this.hasRecovered = false;
+    await this.setTargetFrozen(true);
+    try {
+      await this.command("attribute @s minecraft:max_health base set 20");
+      // Regeneration stays disabled until EAT succeeds, preventing passive
+      // healing at hunger 19 from bypassing Stage Five's food objective.
+      await this.command("gamerule naturalRegeneration false");
+      await this.prepareHungerForEating();
+      await this.command("effect give @s minecraft:instant_health 1 255 true");
+      await sleep(100);
+      await this.command(`damage @s ${20 - STARTING_HEALTH} minecraft:generic`);
+      await sleep(150);
+      await this.command(`give @s minecraft:${FOOD_NAME} ${FOOD_COUNT}`);
+      await sleep(150);
+      await this.equipSword();
+      if (Math.abs(this.bot.health - STARTING_HEALTH) > 0.75)
+        throw new Error(
+          `Stage-five health setup failed: expected 15, observed ${this.bot.health}`
+        );
+      if (this.foodCount() < FOOD_COUNT)
+        throw new Error(
+          "Stage-five steaks were not received; ensure the bot is operator"
+        );
+      this.hasRecovered = false;
+    } finally {
+      await this.setTargetFrozen(false);
+    }
     return this.observe();
   }
 
@@ -108,6 +119,7 @@ export class StageFiveArena extends StageFourArena {
       await this.bot.consume();
       this.hasEaten = true;
       this.eatResult.consumed = true;
+      await this.command("gamerule naturalRegeneration true");
     } catch {
       this.eatResult.interrupted = true;
     } finally {
@@ -164,6 +176,13 @@ export class StageFiveArena extends StageFourArena {
         `Stage-five hunger setup failed: expected at most ${EATABLE_FOOD_LEVEL}, ` +
         `observed ${this.bot.food}`
       );
+  }
+
+  private async setTargetFrozen(frozen: boolean): Promise<void> {
+    await this.command(
+      `data merge entity @e[type=minecraft:zombie,tag=${this.options.targetTag},limit=1] ` +
+      `{NoAI:${frozen ? "1b" : "0b"}}`
+    );
   }
 
   private async equipSword(): Promise<void> {
