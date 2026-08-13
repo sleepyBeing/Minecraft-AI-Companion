@@ -46,6 +46,7 @@ export class StageFiveArena extends StageFourArena {
     this.peakHealthAfterEating = 0;
     this.eatResult = emptyEatResult();
     await super.reset({ ...request, botHealth: 20 });
+    await this.command("effect give @s minecraft:resistance 30 4 true");
     await this.setTargetFrozen(true);
     try {
       // Regeneration stays disabled until EAT succeeds, preventing passive
@@ -57,8 +58,7 @@ export class StageFiveArena extends StageFourArena {
       await this.command(
         `attribute @s minecraft:max_health base set ${STARTING_HEALTH}`
       );
-      await this.command("effect give @s minecraft:instant_health 1 255 true");
-      await sleep(100);
+      await this.healToStartingHealth();
       await this.command("attribute @s minecraft:max_health base set 20");
       await this.waitForStartingHealth();
       await this.command(`give @s minecraft:${FOOD_NAME} ${FOOD_COUNT}`);
@@ -76,6 +76,7 @@ export class StageFiveArena extends StageFourArena {
     } finally {
       // Preflight isolates food/regeneration mechanics from combat. Normal
       // training requests omit freezeTarget, so the zombie remains mobile.
+      await this.command("effect clear @s minecraft:resistance");
       await this.setTargetFrozen(request.freezeTarget === true);
     }
     return this.observe();
@@ -203,6 +204,23 @@ export class StageFiveArena extends StageFourArena {
     ) {
       await sleep(25);
     }
+  }
+
+  private async healToStartingHealth(): Promise<void> {
+    const deadline = Date.now() + 1_500;
+    while (
+      Math.abs(this.bot.health - STARTING_HEALTH) > 0.75 &&
+      Date.now() < deadline
+    ) {
+      // A moderate amplifier avoids overflow-like behavior from level 255
+      // while still healing well beyond the temporary 15-health cap.
+      await this.command("effect give @s minecraft:instant_health 1 10 true");
+      await sleep(75);
+    }
+    if (Math.abs(this.bot.health - STARTING_HEALTH) > 0.75)
+      throw new Error(
+        `Stage-five health clamp failed: expected 15, observed ${this.bot.health}`
+      );
   }
 
   private recordRecoveryProgress(): void {
