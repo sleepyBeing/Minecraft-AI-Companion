@@ -45,15 +45,19 @@ export class StageFiveArena extends StageFourArena {
     await super.reset({ ...request, botHealth: 20 });
     await this.setTargetFrozen(true);
     try {
-      await this.command("attribute @s minecraft:max_health base set 20");
       // Regeneration stays disabled until EAT succeeds, preventing passive
       // healing at hunger 19 from bypassing Stage Five's food objective.
       await this.command("gamerule naturalRegeneration false");
       await this.prepareHungerForEating();
+      // Clamp to the exact starting health instead of applying damage, which
+      // can race with residual hurt state and zombie attacks between episodes.
+      await this.command(
+        `attribute @s minecraft:max_health base set ${STARTING_HEALTH}`
+      );
       await this.command("effect give @s minecraft:instant_health 1 255 true");
       await sleep(100);
-      await this.command(`damage @s ${20 - STARTING_HEALTH} minecraft:generic`);
-      await sleep(150);
+      await this.command("attribute @s minecraft:max_health base set 20");
+      await this.waitForStartingHealth();
       await this.command(`give @s minecraft:${FOOD_NAME} ${FOOD_COUNT}`);
       await sleep(150);
       await this.equipSword();
@@ -183,6 +187,16 @@ export class StageFiveArena extends StageFourArena {
       `data merge entity @e[type=minecraft:zombie,tag=${this.options.targetTag},limit=1] ` +
       `{NoAI:${frozen ? "1b" : "0b"}}`
     );
+  }
+
+  private async waitForStartingHealth(): Promise<void> {
+    const deadline = Date.now() + 1_500;
+    while (
+      Math.abs(this.bot.health - STARTING_HEALTH) > 0.75 &&
+      Date.now() < deadline
+    ) {
+      await sleep(25);
+    }
   }
 
   private async equipSword(): Promise<void> {
