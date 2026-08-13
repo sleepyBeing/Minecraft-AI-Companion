@@ -23,8 +23,8 @@ def run_live_stage_five_preflight(
         _fail(environment, "the live observation/action contract is not 22/12.")
     if not np.isclose(float(info["bot_health"]), 15.0, atol=0.75):
         _fail(environment, "the bot did not start at 15 health.")
-    if int(info.get("food_count", 0)) < 1:
-        _fail(environment, "the bot did not receive its golden apples.")
+    if int(info.get("food_count", 0)) < 64:
+        _fail(environment, "the bot did not receive its 64 steaks.")
 
     protected_position = np.asarray(
         info.get("protected_position"), dtype=np.float32

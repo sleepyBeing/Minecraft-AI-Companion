@@ -34,8 +34,8 @@ class StageFiveAction(IntEnum):
 class StageFiveRecoveryEnv(StageFourRetreatEnv):
 
     STARTING_HEALTH = 15.0
-    DEFAULT_FOOD_COUNT = 3
-    MAX_FOOD_COUNT = 3
+    DEFAULT_FOOD_COUNT = 64
+    MAX_FOOD_COUNT = 64
     HEALTH_PER_FOOD = 5.0
     RECOVERED_HEALTH_THRESHOLD = 19.0
 

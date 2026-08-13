@@ -9,8 +9,10 @@ import {
 import type { Point } from "./stageFourCover.js";
 
 const STARTING_HEALTH = 15;
-const FOOD_NAME = "golden_apple";
-const FOOD_COUNT = 3;
+const FOOD_NAME = "cooked_beef";
+const FOOD_COUNT = 64;
+const EATABLE_FOOD_LEVEL = 14;
+const HUNGER_SETUP_TIMEOUT_MS = 2_000;
 const REENGAGE_MS = 500;
 const REPLAN_MS = 75;
 
@@ -39,6 +41,8 @@ export class StageFiveArena extends StageFourArena {
     this.eatResult = emptyEatResult();
     await super.reset({ ...request, botHealth: 20 });
     await this.command("attribute @s minecraft:max_health base set 20");
+    await this.command("gamerule naturalRegeneration true");
+    await this.prepareHungerForEating();
     await this.command(`damage @s ${20 - STARTING_HEALTH} minecraft:generic`);
     await sleep(150);
     await this.command(`give @s minecraft:${FOOD_NAME} ${FOOD_COUNT}`);
@@ -49,7 +53,7 @@ export class StageFiveArena extends StageFourArena {
         `Stage-five health setup failed: expected 15, observed ${this.bot.health}`
       );
     if (this.foodCount() < FOOD_COUNT)
-      throw new Error("Stage-five food was not received; ensure the bot is operator");
+      throw new Error("Stage-five steaks were not received; ensure the bot is operator");
     this.hasRecovered = false;
     return this.observe();
   }
@@ -139,6 +143,22 @@ export class StageFiveArena extends StageFourArena {
     return this.bot.inventory.items()
       .filter((item) => item.name === FOOD_NAME)
       .reduce((total, item) => total + item.count, 0);
+  }
+
+  private async prepareHungerForEating(): Promise<void> {
+    const deadline = Date.now() + HUNGER_SETUP_TIMEOUT_MS;
+    await this.command("effect give @s minecraft:hunger 2 255 true");
+    try {
+      while (this.bot.food > EATABLE_FOOD_LEVEL && Date.now() < deadline)
+        await sleep(25);
+    } finally {
+      await this.command("effect clear @s minecraft:hunger");
+    }
+    if (this.bot.food > EATABLE_FOOD_LEVEL)
+      throw new Error(
+        `Stage-five hunger setup failed: expected at most ${EATABLE_FOOD_LEVEL}, ` +
+        `observed ${this.bot.food}`
+      );
   }
 
   private async equipSword(): Promise<void> {
