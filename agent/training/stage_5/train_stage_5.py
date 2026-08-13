@@ -38,7 +38,7 @@ def main() -> None:
     tf.keras.utils.set_random_seed(args.seed)
     np.random.seed(args.seed)
 
-    environment, source = create_environment()
+    environment, source = create_environment(args)
     run_name = args.run_name or datetime.now().strftime(
         "stage5_recovery_%Y%m%d_%H%M%S"
     )

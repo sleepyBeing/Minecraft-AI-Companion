@@ -127,6 +127,9 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
             )
 
         selected = StageFiveAction(action)
+        health_before = self.bot_health
+        food_count_before = self.food_count
+        recovered_before = self.has_recovered
         target_distance_before = self._distance()
         safe_distance_before = self._safe_distance()
         in_cover_before = self.confirmed_in_cover
@@ -157,6 +160,9 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
 
         return self._apply_stage_five_rewards(
             selected=selected,
+            health_before=health_before,
+            food_count_before=food_count_before,
+            recovered_before=recovered_before,
             target_distance_before=target_distance_before,
             safe_distance_before=safe_distance_before,
             in_cover_before=in_cover_before,
@@ -166,6 +172,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
             truncated=truncated,
             info=info,
             duration_steps=duration_steps,
+            source="simulation",
         )
 
     def _run_base_action(
@@ -239,6 +246,9 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
         self,
         *,
         selected: StageFiveAction,
+        health_before: float,
+        food_count_before: int,
+        recovered_before: bool,
         target_distance_before: float,
         safe_distance_before: float,
         in_cover_before: bool,
@@ -248,6 +258,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
         truncated: bool,
         info: dict[str, Any],
         duration_steps: int,
+        source: str,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         target_distance_change = target_distance_before - self._distance()
         safe_distance_change = safe_distance_before - self._safe_distance()
@@ -290,26 +301,31 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
             reward += cover_progress_reward
 
         safe_eat_reward = 0.0
-        recovered_health = 0.0
-        recovery_reward = 0.0
+        recovered_health = (
+            max(0.0, self.bot_health - health_before)
+            if source == "minecraft"
+            else 0.0
+        )
+        recovery_reward = (
+            recovered_health * self.HEALTH_RECOVERY_REWARD_SCALE
+        )
         recovery_completion_reward = 0.0
         eating_close_penalty = 0.0
         unsafe_eat_penalty = 0.0
         no_food_penalty = 0.0
         unnecessary_eat_penalty = 0.0
-        ate_successfully = False
+        ate_successfully = bool(info.get("ate_successfully", False))
         if selected == StageFiveAction.EAT and alive:
-            if self.food_count <= 0:
+            if food_count_before <= 0 or bool(info.get("eat_no_food", False)):
                 no_food_penalty = self.NO_FOOD_PENALTY
-            elif self.bot_health >= self.MAX_HEALTH:
+            elif health_before >= self.MAX_HEALTH:
                 unnecessary_eat_penalty = self.UNNECESSARY_EAT_PENALTY
             else:
-                distance_before_eating = target_distance_before
-                if distance_before_eating < self.SAFE_EAT_DISTANCE:
+                if target_distance_before < self.SAFE_EAT_DISTANCE:
                     eating_close_penalty = self.EAT_CLOSE_PENALTY
                 elif not safe_when_eating_started:
                     unsafe_eat_penalty = self.UNSAFE_EAT_PENALTY
-                else:
+                if source == "simulation":
                     self.food_count -= 1
                     recovered_health = min(
                         self.HEALTH_PER_FOOD,
@@ -318,22 +334,25 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
                     self.bot_health += recovered_health
                     self.has_eaten = True
                     ate_successfully = True
-                    safe_eat_reward = self.SAFE_EAT_REWARD
                     recovery_reward = (
                         recovered_health * self.HEALTH_RECOVERY_REWARD_SCALE
                     )
-                    if (
-                        not self.has_recovered
-                        and self.bot_health >= self.RECOVERED_HEALTH_THRESHOLD
-                    ):
-                        self.has_recovered = True
-                        recovery_completion_reward = (
-                            self.RECOVERY_COMPLETION_REWARD
-                        )
+                if ate_successfully and safe_when_eating_started:
+                    safe_eat_reward = self.SAFE_EAT_REWARD
+                if (
+                    source == "simulation"
+                    and self.bot_health >= self.RECOVERED_HEALTH_THRESHOLD
+                ):
+                    self.has_recovered = True
             reward += safe_eat_reward + recovery_reward
-            reward += recovery_completion_reward
             reward -= eating_close_penalty + unsafe_eat_penalty
             reward -= no_food_penalty + unnecessary_eat_penalty
+
+        if not recovered_before and self.has_recovered:
+            recovery_completion_reward = self.RECOVERY_COMPLETION_REWARD
+        reward += recovery_completion_reward
+        if source == "minecraft" and selected != StageFiveAction.EAT:
+            reward += recovery_reward
 
         reengage_reward = 0.0
         premature_reengage_penalty = 0.0
@@ -369,6 +388,13 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
         reward += timeout_reward
 
         defeated_after_recovery = not self.target_alive and self.has_recovered
+        premature_defeat_reward_removed = 0.0
+        if not self.target_alive and not self.has_recovered:
+            # The inherited combat layer rewards every kill. Stage Five's
+            # objective specifically requires recovery before victory, so a
+            # premature kill must not receive that terminal bonus.
+            premature_defeat_reward_removed = self.DEFEAT_REWARD
+            reward -= premature_defeat_reward_removed
         recovery_victory_reward = (
             self.DEFEAT_AFTER_RECOVERY_REWARD
             if defeated_after_recovery
@@ -398,10 +424,13 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
                 "survived_timeout_reward": timeout_reward,
                 "death_penalty": death_penalty,
                 "defeated_after_recovery": defeated_after_recovery,
+                "premature_defeat_reward_removed": (
+                    premature_defeat_reward_removed
+                ),
                 "recovery_victory_reward": recovery_victory_reward,
                 "action_duration_steps": duration_steps,
                 "success": defeated_after_recovery,
-                "source": "simulation",
+                "source": source,
             }
         )
         return self._get_observation(), float(reward), terminated, truncated, info
@@ -464,6 +493,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
             "survived_timeout_reward": 0.0,
             "death_penalty": 0.0,
             "defeated_after_recovery": False,
+            "premature_defeat_reward_removed": 0.0,
             "recovery_victory_reward": 0.0,
             "action_duration_steps": 0.0,
             "success": False,

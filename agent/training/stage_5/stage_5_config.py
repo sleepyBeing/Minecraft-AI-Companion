@@ -27,6 +27,13 @@ def parse_arguments() -> argparse.Namespace:
         "--timesteps", type=positive_integer, default=DEFAULT_TIMESTEPS
     )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--simulation",
+        action="store_true",
+        help="Use the local Stage Five simulation instead of Minecraft.",
+    )
+    parser.add_argument("--bridge-url", default="ws://127.0.0.1:8765")
+    parser.add_argument("--bridge-timeout", type=positive_float, default=20.0)
     parser.add_argument("--rollout-steps", type=positive_integer, default=2_048)
     parser.add_argument("--batch-size", type=positive_integer, default=64)
 

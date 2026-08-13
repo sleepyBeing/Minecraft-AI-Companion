@@ -13,7 +13,10 @@ export interface BridgeRequest {
     | "stage3.observe"
     | "stage4.reset"
     | "stage4.step"
-    | "stage4.observe";
+    | "stage4.observe"
+    | "stage5.reset"
+    | "stage5.step"
+    | "stage5.observe";
   action?: number;
   botPosition?: [number, number];
   targetPosition?: [number, number];

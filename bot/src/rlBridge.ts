@@ -4,6 +4,7 @@ import { StageOneArena } from "./rl/stageOneArena.js";
 import { StageTwoArena } from "./rl/stageTwoArena.js";
 import { StageThreeArena } from "./rl/stageThreeArena.js";
 import { StageFourArena } from "./rl/stageFourArena.js";
+import { StageFiveArena } from "./rl/stageFiveArena.js";
 import type { BridgeRequest } from "./rl/shared.js";
 
 export interface RlBridgeOptions {
@@ -22,6 +23,7 @@ export function startRlBridge(bot: Bot, options: RlBridgeOptions = {}): () => vo
   const stageTwo = new StageTwoArena(bot);
   const stageThree = new StageThreeArena(bot);
   const stageFour = new StageFourArena(bot);
+  const stageFive = new StageFiveArena(bot);
   let client: WebSocket | null = null;
   let trainingActive = false;
 
@@ -186,6 +188,31 @@ export function startRlBridge(bot: Bot, options: RlBridgeOptions = {}): () => vo
         case "stage4.observe": {
           if (!trainingActive) throw new Error("Call stage4.reset before observing");
           send(socket, { id: request.id, ok: true, state: stageFour.observe() });
+          return;
+        }
+
+        case "stage5.reset": {
+          if (!trainingActive) {
+            trainingActive = true;
+            options.onTrainingStart?.();
+          }
+          const state = await stageFive.reset(request);
+          send(socket, { id: request.id, ok: true, state });
+          return;
+        }
+
+        case "stage5.step": {
+          if (!trainingActive) throw new Error("Call stage5.reset before stage5.step");
+          if (!Number.isInteger(request.action) || request.action! < 0 || request.action! > 11)
+            throw new Error("Stage-five action must be an integer from 0 to 11");
+          const state = await stageFive.step(request.action!);
+          send(socket, { id: request.id, ok: true, state });
+          return;
+        }
+
+        case "stage5.observe": {
+          if (!trainingActive) throw new Error("Call stage5.reset before observing");
+          send(socket, { id: request.id, ok: true, state: stageFive.observe() });
           return;
         }
 
