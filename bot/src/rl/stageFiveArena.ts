@@ -11,7 +11,9 @@ import type { Point } from "./stageFourCover.js";
 const STARTING_HEALTH = 15;
 const FOOD_NAME = "cooked_beef";
 const FOOD_COUNT = 64;
-const EATABLE_FOOD_LEVEL = 14;
+// Any value below 20 allows normal steak consumption. Keeping 19 avoids
+// wasting reset time while still providing enough steak saturation to heal.
+const EATABLE_FOOD_LEVEL = 19;
 const HUNGER_EFFECT_SECONDS = 8;
 const HUNGER_SETUP_TIMEOUT_MS = 7_500;
 const REENGAGE_MS = 500;
