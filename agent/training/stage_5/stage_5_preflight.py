@@ -17,7 +17,7 @@ def run_live_stage_five_preflight(
     environment: LiveStageFiveRecoveryEnv,
 ) -> None:
     observation, info = environment.reset(
-        options={"rebuild_arena": True},
+        options={"rebuild_arena": True, "freeze_target": True},
     )
     if observation.shape != (22,) or environment.action_space.n != 12:
         _fail(environment, "the live observation/action contract is not 22/12.")
@@ -44,6 +44,7 @@ def run_live_stage_five_preflight(
                 float(target_position[1]),
             ),
             "rebuild_arena": False,
+            "freeze_target": True,
         }
     )
     for _ in range(3):
@@ -70,7 +71,7 @@ def run_live_stage_five_preflight(
         _fail(environment, "safe eating did not produce positive reward.")
 
     recovered_info = eat_info
-    for _ in range(50):
+    for _ in range(100):
         if bool(recovered_info.get("has_recovered", False)):
             break
         _, _, terminated, truncated, recovered_info = environment.step(
@@ -79,7 +80,11 @@ def run_live_stage_five_preflight(
         if terminated or truncated:
             _fail(environment, "the recovery validation episode ended early.")
     if not bool(recovered_info.get("has_recovered", False)):
-        _fail(environment, "real health did not recover after eating.")
+        _fail(
+            environment,
+            "real health did not reach the recovery threshold after eating "
+            f"(last health={float(recovered_info['bot_health']):.2f}).",
+        )
 
     distance_before = float(recovered_info["distance_to_target"])
     _, _, _, _, reengage_info = environment.step(

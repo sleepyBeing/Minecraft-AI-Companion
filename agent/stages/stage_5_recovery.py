@@ -302,7 +302,11 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
 
         safe_eat_reward = 0.0
         recovered_health = (
-            max(0.0, self.bot_health - health_before)
+            max(
+                0.0,
+                self.bot_health - health_before,
+                float(info.get("server_recovered_health", 0.0)),
+            )
             if source == "minecraft"
             else 0.0
         )

@@ -32,15 +32,18 @@ interface EatResult {
 export class StageFiveArena extends StageFourArena {
   private hasEaten = false;
   private hasRecovered = false;
+  private peakHealthAfterEating = 0;
   private eatResult = emptyEatResult();
 
   constructor(bot: Bot) {
     super(bot);
+    bot.on("health", () => this.recordRecoveryProgress());
   }
 
   override async reset(request: BridgeRequest) {
     this.hasEaten = false;
     this.hasRecovered = false;
+    this.peakHealthAfterEating = 0;
     this.eatResult = emptyEatResult();
     await super.reset({ ...request, botHealth: 20 });
     await this.setTargetFrozen(true);
@@ -71,7 +74,9 @@ export class StageFiveArena extends StageFourArena {
         );
       this.hasRecovered = false;
     } finally {
-      await this.setTargetFrozen(false);
+      // Preflight isolates food/regeneration mechanics from combat. Normal
+      // training requests omit freezeTarget, so the zombie remains mobile.
+      await this.setTargetFrozen(request.freezeTarget === true);
     }
     return this.observe();
   }
@@ -83,12 +88,13 @@ export class StageFiveArena extends StageFourArena {
 
   override observe() {
     const state = super.observe();
-    if (this.bot.health >= 19) this.hasRecovered = true;
+    this.recordRecoveryProgress();
     return {
       ...state,
       foodCount: this.foodCount(),
       hasEaten: this.hasEaten,
       hasRecovered: this.hasRecovered,
+      peakHealthAfterEating: this.peakHealthAfterEating,
       eatResult: { ...this.eatResult }
     };
   }
@@ -197,6 +203,15 @@ export class StageFiveArena extends StageFourArena {
     ) {
       await sleep(25);
     }
+  }
+
+  private recordRecoveryProgress(): void {
+    if (!this.hasEaten) return;
+    this.peakHealthAfterEating = Math.max(
+      this.peakHealthAfterEating,
+      this.bot.health
+    );
+    if (this.peakHealthAfterEating >= 19) this.hasRecovered = true;
   }
 
   private async equipSword(): Promise<void> {

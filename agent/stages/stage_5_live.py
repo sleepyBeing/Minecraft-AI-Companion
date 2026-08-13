@@ -32,6 +32,7 @@ class LiveStageFiveRecoveryEnv(
         bridge_timeout: float = 20.0,
         render_mode: str | None = None,
     ) -> None:
+        self.peak_health_after_eating = 0.0
         super().__init__(
             bridge_url=bridge_url,
             bridge_timeout=bridge_timeout,
@@ -50,6 +51,7 @@ class LiveStageFiveRecoveryEnv(
         health_before = self.bot_health
         food_count_before = self.food_count
         recovered_before = self.has_recovered
+        peak_health_before = self.peak_health_after_eating
         target_distance_before = self._distance()
         safe_distance_before = self._safe_distance()
         in_cover_before = self.confirmed_in_cover
@@ -84,6 +86,10 @@ class LiveStageFiveRecoveryEnv(
                     self.server_eat_result.get("noFood", False)
                 ),
                 "eat_result": dict(self.server_eat_result),
+                "server_recovered_health": max(
+                    0.0,
+                    self.peak_health_after_eating - peak_health_before,
+                ),
             }
         )
         return self._apply_stage_five_rewards(
@@ -117,6 +123,9 @@ class LiveStageFiveRecoveryEnv(
             eat_result = state["eatResult"]
             if not isinstance(eat_result, dict):
                 raise ValueError("eatResult must be an object")
+            peak_health = float(state["peakHealthAfterEating"])
+            if not 0.0 <= peak_health <= self.MAX_HEALTH:
+                raise ValueError("peakHealthAfterEating is outside health bounds")
 
             self.server_safe_position = safe_position
             self.server_protected_position = protected
@@ -125,6 +134,7 @@ class LiveStageFiveRecoveryEnv(
             self.food_count = food_count
             self.has_eaten = bool(state["hasEaten"])
             self.has_recovered = bool(state["hasRecovered"])
+            self.peak_health_after_eating = peak_health
             self.server_eat_result = dict(eat_result)
         except (KeyError, TypeError, ValueError) as error:
             raise RuntimeError(

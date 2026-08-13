@@ -372,6 +372,7 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
             botYaw=self.bot_yaw,
             botHealth=self.bot_health,
             rebuildArena=bool(options.get("rebuild_arena", False)),
+            freezeTarget=bool(options.get("freeze_target", False)),
         )
         self._apply_live_state(response["state"])
         return self._get_observation(), self._get_info()

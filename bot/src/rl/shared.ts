@@ -23,6 +23,7 @@ export interface BridgeRequest {
   botYaw?: number;
   botHealth?: number;
   rebuildArena?: boolean;
+  freezeTarget?: boolean;
 }
 
 export interface ArenaOrigin {
