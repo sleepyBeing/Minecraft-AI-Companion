@@ -43,7 +43,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
     REENGAGE_COMMITMENT_STEPS = 5
     SAFE_EAT_DISTANCE = 4.0
 
-    SAFE_EAT_REWARD = 3.0
+    SAFE_EAT_REWARD = 4.0
     HEALTH_RECOVERY_REWARD_SCALE = 1.5
     RECOVERY_COMPLETION_REWARD = 4.0
     REENGAGE_RANGE_REWARD = 1.0
@@ -52,7 +52,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
     SURVIVED_TIMEOUT_REWARD = 10.0
 
     EAT_CLOSE_PENALTY = 4.0
-    UNSAFE_EAT_PENALTY = 1.0
+    UNSAFE_EAT_PENALTY = 0.0
     NO_FOOD_PENALTY = 1.0
     UNNECESSARY_EAT_PENALTY = 0.5
     PREMATURE_REENGAGE_PENALTY = 0.25
@@ -302,11 +302,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
 
         safe_eat_reward = 0.0
         recovered_health = (
-            max(
-                0.0,
-                self.bot_health - health_before,
-                float(info.get("server_recovered_health", 0.0)),
-            )
+            float(info.get("server_recovered_health", 0.0))
             if source == "minecraft"
             else 0.0
         )

@@ -128,6 +128,7 @@ export class StageFiveArena extends StageFourArena {
       this.bot.clearControlStates();
       await this.bot.equip(food, "hand");
       await this.bot.consume();
+      this.peakHealthAfterEating = Math.max(STARTING_HEALTH, healthBefore);
       this.hasEaten = true;
       this.eatResult.consumed = true;
       await this.command("gamerule naturalRegeneration true");

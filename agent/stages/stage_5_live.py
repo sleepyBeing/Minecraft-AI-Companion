@@ -51,7 +51,9 @@ class LiveStageFiveRecoveryEnv(
         health_before = self.bot_health
         food_count_before = self.food_count
         recovered_before = self.has_recovered
-        peak_health_before = self.peak_health_after_eating
+        peak_health_before = max(
+            self.STARTING_HEALTH, self.peak_health_after_eating
+        )
         target_distance_before = self._distance()
         safe_distance_before = self._safe_distance()
         in_cover_before = self.confirmed_in_cover

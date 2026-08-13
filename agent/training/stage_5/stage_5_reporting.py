@@ -127,12 +127,23 @@ def print_rollout(
     rollout: dict[str, np.ndarray],
     metrics: dict[str, float],
 ) -> None:
+    covered_eats = np.sum(rollout["safe_eat_reward"] > 0)
+    open_eats = max(
+        0,
+        int(
+            np.sum(rollout["successful_eats"])
+            - np.sum(rollout["close_eat_attempts"])
+            - covered_eats
+        ),
+    )
     print(
         f"step={step:,}/{timesteps:,} "
         f"reward={np.mean(rollout['rewards']):+.3f} "
         f"deaths={int(np.sum(rollout['bot_defeats']))} "
         f"eat={int(np.sum(rollout['eat_actions']))} "
-        f"safe_eats={int(np.sum(rollout['successful_eats']))} "
+        f"successful_eats={int(np.sum(rollout['successful_eats']))} "
+        f"covered_eats={int(covered_eats)} "
+        f"open_eats={open_eats} "
         f"close_eats={int(np.sum(rollout['close_eat_attempts']))} "
         f"recovered={np.mean(rollout['has_recovered_steps']):.1%} "
         f"reengage={int(np.sum(rollout['reengage_actions']))} "
