@@ -12,7 +12,8 @@ const STARTING_HEALTH = 15;
 const FOOD_NAME = "cooked_beef";
 const FOOD_COUNT = 64;
 const EATABLE_FOOD_LEVEL = 14;
-const HUNGER_SETUP_TIMEOUT_MS = 2_000;
+const HUNGER_EFFECT_SECONDS = 8;
+const HUNGER_SETUP_TIMEOUT_MS = 7_500;
 const REENGAGE_MS = 500;
 const REPLAN_MS = 75;
 
@@ -147,7 +148,9 @@ export class StageFiveArena extends StageFourArena {
 
   private async prepareHungerForEating(): Promise<void> {
     const deadline = Date.now() + HUNGER_SETUP_TIMEOUT_MS;
-    await this.command("effect give @s minecraft:hunger 2 255 true");
+    await this.command(
+      `effect give @s minecraft:hunger ${HUNGER_EFFECT_SECONDS} 255 true`
+    );
     try {
       while (this.bot.food > EATABLE_FOOD_LEVEL && Date.now() < deadline)
         await sleep(25);
