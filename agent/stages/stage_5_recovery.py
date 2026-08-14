@@ -43,7 +43,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
     REENGAGE_COMMITMENT_STEPS = 5
     SAFE_EAT_DISTANCE = 4.0
 
-    SAFE_EAT_REWARD = 4.0
+    SAFE_EAT_REWARD = 8.0
     HEALTH_RECOVERY_REWARD_SCALE = 1.5
     RECOVERY_COMPLETION_REWARD = 4.0
     REENGAGE_RANGE_REWARD = 1.0
@@ -61,6 +61,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
     RETREAT_PROGRESS_REWARD_SCALE = 1.0
     COVER_PROGRESS_REWARD_SCALE = 0.75
     COVER_PROGRESS_REWARD_CAP = 5.0
+    COVER_ENTRY_REWARD = 2.0
 
     def __init__(self, render_mode: str | None = None) -> None:
         super().__init__(render_mode=render_mode)
@@ -299,6 +300,14 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
                 self.COVER_PROGRESS_REWARD_CAP,
             )
             reward += cover_progress_reward
+        if (
+            not self.cover_bonus_awarded
+            and self.confirmed_in_cover
+            and self.target_alive
+        ):
+            cover_progress_reward += self.COVER_ENTRY_REWARD
+            reward += self.COVER_ENTRY_REWARD
+            self.cover_bonus_awarded = True
 
         safe_eat_reward = 0.0
         recovered_health = (
