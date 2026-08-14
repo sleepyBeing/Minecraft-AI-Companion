@@ -44,6 +44,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
     SAFE_EAT_DISTANCE = 4.0
 
     SAFE_EAT_REWARD = 8.0
+    SUCCESSFUL_EAT_REWARD = 2.0
     HEALTH_RECOVERY_REWARD_SCALE = 1.5
     RECOVERY_COMPLETION_REWARD = 4.0
     REENGAGE_RANGE_REWARD = 1.0
@@ -310,6 +311,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
             self.cover_bonus_awarded = True
 
         safe_eat_reward = 0.0
+        successful_eat_reward = 0.0
         recovered_health = (
             float(info.get("server_recovered_health", 0.0))
             if source == "minecraft"
@@ -348,12 +350,18 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
                     )
                 if ate_successfully and safe_when_eating_started:
                     safe_eat_reward = self.SAFE_EAT_REWARD
+                if ate_successfully:
+                    successful_eat_reward = self.SUCCESSFUL_EAT_REWARD
                 if (
                     source == "simulation"
                     and self.bot_health >= self.RECOVERED_HEALTH_THRESHOLD
                 ):
                     self.has_recovered = True
-            reward += safe_eat_reward + recovery_reward
+            reward += (
+                safe_eat_reward
+                + successful_eat_reward
+                + recovery_reward
+            )
             reward -= eating_close_penalty + unsafe_eat_penalty
             reward -= no_food_penalty + unnecessary_eat_penalty
 
@@ -419,6 +427,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
                 "retreat_progress_reward": retreat_reward,
                 "cover_progress_reward": cover_progress_reward,
                 "safe_eat_reward": safe_eat_reward,
+                "successful_eat_reward": successful_eat_reward,
                 "recovered_health": recovered_health,
                 "health_recovery_reward": recovery_reward,
                 "recovery_completion_reward": recovery_completion_reward,
@@ -488,6 +497,7 @@ class StageFiveRecoveryEnv(StageFourRetreatEnv):
             "retreat_progress_reward": 0.0,
             "cover_progress_reward": 0.0,
             "safe_eat_reward": 0.0,
+            "successful_eat_reward": 0.0,
             "recovered_health": 0.0,
             "health_recovery_reward": 0.0,
             "recovery_completion_reward": 0.0,

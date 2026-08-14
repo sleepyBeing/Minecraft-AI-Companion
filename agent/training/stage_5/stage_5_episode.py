@@ -26,6 +26,7 @@ METRIC_NAMES = (
     "cover_steps",
     "recovered_steps",
     "safe_eat_reward",
+    "successful_eat_reward",
     "health_recovery_reward",
     "recovery_completion_reward",
     "reengage_reward",
@@ -80,6 +81,7 @@ def transition_metrics(
         "cover_steps": float(info["in_cover"]),
         "recovered_steps": float(info["has_recovered"]),
         "safe_eat_reward": float(info["safe_eat_reward"]),
+        "successful_eat_reward": float(info["successful_eat_reward"]),
         "health_recovery_reward": float(info["health_recovery_reward"]),
         "recovery_completion_reward": float(
             info["recovery_completion_reward"]

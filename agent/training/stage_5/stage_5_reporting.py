@@ -97,6 +97,9 @@ def write_rollout_summaries(
             "recovery/safe_eat_rewards": np.sum(
                 rollout["safe_eat_reward"]
             ),
+            "recovery/successful_eat_rewards": np.sum(
+                rollout["successful_eat_reward"]
+            ),
             "recovery/health_rewards": np.sum(
                 rollout["health_recovery_reward"]
             ),
