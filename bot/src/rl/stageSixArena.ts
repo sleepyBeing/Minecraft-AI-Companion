@@ -91,14 +91,13 @@ export class StageSixArena extends StageFiveArena {
     const serverHealth = await this.npcHealthReader.query(false);
     if (serverHealth !== null) this.npcHealth = serverHealth;
 
-    await this.command("attribute @s minecraft:max_health base set 20");
-    await this.command("effect give @s minecraft:instant_health 1 10 true");
-    await this.command("effect give @s minecraft:invisibility 999999 0 true");
-    await sleep(100);
-    if (Math.abs(this.bot.health - 20) > 0.75)
-      throw new Error(
-        `Stage-six bot health setup failed: expected 20, observed ${this.bot.health}`
-      );
+    await this.command("effect give @s minecraft:resistance 5 4 true");
+    try {
+      await this.healBotToFullHealth();
+      await this.command("effect give @s minecraft:invisibility 999999 0 true");
+    } finally {
+      await this.command("effect clear @s minecraft:resistance");
+    }
     await this.setTargetFrozen(request.freezeTarget === true);
     return this.observe();
   }
@@ -150,6 +149,19 @@ export class StageSixArena extends StageFiveArena {
   override async restoreWorldSettings(): Promise<void> {
     await super.restoreWorldSettings();
     await this.command("effect clear @s minecraft:invisibility");
+  }
+
+  private async healBotToFullHealth(): Promise<void> {
+    const deadline = Date.now() + 2_000;
+    await this.command("attribute @s minecraft:max_health base set 20");
+    while (Math.abs(this.bot.health - 20) > 0.25 && Date.now() < deadline) {
+      await this.command("effect give @s minecraft:instant_health 1 10 true");
+      await sleep(75);
+    }
+    if (Math.abs(this.bot.health - 20) > 0.25)
+      throw new Error(
+        `Stage-six bot health setup failed: expected 20, observed ${this.bot.health}`
+      );
   }
 
   private findNpcEntity(): Entity | null {
