@@ -369,6 +369,11 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
             f"{self.BRIDGE_STAGE}.reset",
             botPosition=self.bot_position.tolist(),
             targetPosition=self.target_position.tolist(),
+            npcPosition=(
+                self.npc_position.tolist()
+                if hasattr(self, "npc_position")
+                else None
+            ),
             botYaw=self.bot_yaw,
             botHealth=self.bot_health,
             rebuildArena=bool(options.get("rebuild_arena", False)),

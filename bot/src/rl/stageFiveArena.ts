@@ -190,7 +190,7 @@ export class StageFiveArena extends StageFourArena {
       );
   }
 
-  private async setTargetFrozen(frozen: boolean): Promise<void> {
+  protected async setTargetFrozen(frozen: boolean): Promise<void> {
     await this.command(
       `data merge entity @e[type=minecraft:zombie,tag=${this.options.targetTag},limit=1] ` +
       `{NoAI:${frozen ? "1b" : "0b"}}`

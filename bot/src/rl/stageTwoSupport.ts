@@ -111,7 +111,8 @@ export class TargetHealthReader {
     private readonly bot: Bot,
     private readonly objective: string,
     private readonly targetTag: string,
-    private readonly command: ArenaCommand
+    private readonly command: ArenaCommand,
+    private readonly targetType = "minecraft:zombie"
   ) {}
 
   async ensureObjective(): Promise<void> {
@@ -127,7 +128,7 @@ export class TargetHealthReader {
     await this.command(
       `execute store result score #target ${this.objective} ` +
       "run data get entity " +
-      `@e[type=minecraft:zombie,tag=${this.targetTag},limit=1] Health 100`
+      `@e[type=${this.targetType},tag=${this.targetTag},limit=1] Health 100`
     );
 
     return new Promise<number | null>((resolve) => {
