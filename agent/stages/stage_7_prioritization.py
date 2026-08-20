@@ -56,7 +56,8 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
     PRIORITY_NEUTRALIZATION_REWARD = 8.0
     ENEMY_COUNT = 2
     ENEMY_NPC_MIN_DISTANCE = 2.5
-    ENEMY_NPC_MAX_DISTANCE = 5.5
+    # The live arena inherits Stage Six's 2.5-to-5-block reset contract.
+    ENEMY_NPC_MAX_DISTANCE = 5.0
     NPC_ZOMBIE_MAX_DISTANCE = ENEMY_NPC_MAX_DISTANCE
     def __init__(self, render_mode: str | None = None) -> None:
         super().__init__(render_mode=render_mode)
@@ -466,7 +467,7 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
                 raise ValueError("enemy positions must be open points in the arena")
             distance = float(np.linalg.norm(position - npc))
             if not self.ENEMY_NPC_MIN_DISTANCE <= distance <= self.ENEMY_NPC_MAX_DISTANCE:
-                raise ValueError("each enemy must start 2.5 to 5.5 blocks from the NPC")
+                raise ValueError("each enemy must start 2.5 to 5 blocks from the NPC")
         if np.linalg.norm(positions[0] - positions[1]) < 2.0:
             raise ValueError("the two enemies must start at least 2 blocks apart")
         return positions.copy()
