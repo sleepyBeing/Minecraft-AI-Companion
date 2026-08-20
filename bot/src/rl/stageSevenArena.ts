@@ -33,6 +33,7 @@ interface ThreatState {
 
 /** Two controlled Minecraft threats with explicit policy target selection. */
 export class StageSevenArena extends StageSixArena {
+  private freezeThreats = false;
   private configuringBase = true;
   private selectedEnemy = 0;
   private threats: ThreatState[] = [];
@@ -51,6 +52,7 @@ export class StageSevenArena extends StageSixArena {
   }
 
   override async reset(request: BridgeRequest) {
+    this.freezeThreats = request.freezeTarget === true;
     const types = validateThreatTypes(request.enemyTypes);
     const positions = validateEnemyPositions(request.enemyPositions);
     this.configuringBase = true;
@@ -212,6 +214,7 @@ export class StageSevenArena extends StageSixArena {
   }
 
   private async advanceThreats(duration: number): Promise<void> {
+    if (this.freezeThreats) return;
     const botPosition = this.botLocalPosition();
     let issuedCommand = false;
     for (let index = 0; index < this.threats.length; index += 1) {
