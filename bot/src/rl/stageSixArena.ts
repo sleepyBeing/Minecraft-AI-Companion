@@ -18,12 +18,12 @@ const NPC_THREAT_DISTANCE = 2.25;
 
 /** Stage Five arena extended with a stationary villager protection target. */
 export class StageSixArena extends StageFiveArena {
-  private npcPosition: [number, number] = [7.5, 7.5];
-  private npcEntityId: number | null = null;
-  private npcHealth = NPC_MAX_HEALTH;
-  private npcConfirmedDead = false;
-  private npcHealthDirty = false;
-  private readonly npcHealthReader: TargetHealthReader;
+  protected npcPosition: [number, number] = [7.5, 7.5];
+  protected npcEntityId: number | null = null;
+  protected npcHealth = NPC_MAX_HEALTH;
+  protected npcConfirmedDead = false;
+  protected npcHealthDirty = false;
+  protected readonly npcHealthReader: TargetHealthReader;
 
   constructor(bot: Bot) {
     super(bot);
@@ -164,7 +164,7 @@ export class StageSixArena extends StageFiveArena {
       );
   }
 
-  private findNpcEntity(): Entity | null {
+  protected findNpcEntity(): Entity | null {
     if (this.npcEntityId !== null) {
       const known = this.bot.entities[this.npcEntityId];
       if (known) return known;

@@ -46,13 +46,13 @@ const STAGE_TWO_OPTIONS: CombatArenaOptions = {
 export class StageTwoArena {
   protected origin: ArenaOrigin | null = null;
   private arenaBuilt = false;
-  private targetPosition: [number, number] = [10.5, 7.5];
-  private targetEntityId: number | null = null;
-  private lastKnownTargetHealth = 20;
-  private targetConfirmedDead = false;
+  protected targetPosition: [number, number] = [10.5, 7.5];
+  protected targetEntityId: number | null = null;
+  protected lastKnownTargetHealth = 20;
+  protected targetConfirmedDead = false;
   private botConfirmedDead = false;
-  private elapsedSeconds = 0;
-  private nextAttackTime = 0;
+  protected elapsedSeconds = 0;
+  protected nextAttackTime = 0;
   private pendingAttackUntil = 0;
   private readonly healthReader: TargetHealthReader;
   private lastActionResult = createEmptyAttackResult();
@@ -199,7 +199,7 @@ export class StageTwoArena {
     this.targetEntityId = targetEntity.id;
     this.lastKnownTargetHealth = targetEntity.health ?? 20;
     await this.healthReader.ensureObjective();
-    const serverHealth = await this.healthReader.query(this.targetConfirmedDead);
+    const serverHealth = await this.queryTargetHealth(this.targetConfirmedDead);
     if (serverHealth !== null) this.lastKnownTargetHealth = serverHealth;
 
     const resetDistance = Math.hypot(
@@ -302,7 +302,7 @@ export class StageTwoArena {
               this.nextAttackTime =
                 this.elapsedSeconds + IRON_SWORD_COOLDOWN_SECONDS;
               await this.waitForAttackResult(healthBeforeAttack);
-              const serverHealth = await this.healthReader.query(
+              const serverHealth = await this.queryTargetHealth(
                 this.targetConfirmedDead
               );
               if (serverHealth !== null) {
@@ -424,6 +424,12 @@ export class StageTwoArena {
       return reacquired;
     }
     return null;
+  }
+
+  protected async queryTargetHealth(
+    targetConfirmedDead: boolean
+  ): Promise<number | null> {
+    return this.healthReader.query(targetConfirmedDead);
   }
 
   private async waitForTargetEntity(): Promise<Entity | null> {

@@ -374,6 +374,21 @@ class LiveStageTwoStationaryCombatEnv(StageTwoStationaryCombatEnv):
                 if hasattr(self, "npc_position")
                 else None
             ),
+            enemyPositions=(
+                self.enemy_positions.tolist()
+                if hasattr(self, "enemy_positions")
+                else None
+            ),
+            enemyTypes=(
+                list(self.enemy_types)
+                if hasattr(self, "enemy_types")
+                else None
+            ),
+            selectedEnemy=(
+                int(self.selected_enemy)
+                if hasattr(self, "selected_enemy")
+                else None
+            ),
             botYaw=self.bot_yaw,
             botHealth=self.bot_health,
             rebuildArena=bool(options.get("rebuild_arena", False)),

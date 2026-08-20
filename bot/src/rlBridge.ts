@@ -6,6 +6,7 @@ import { StageThreeArena } from "./rl/stageThreeArena.js";
 import { StageFourArena } from "./rl/stageFourArena.js";
 import { StageFiveArena } from "./rl/stageFiveArena.js";
 import { StageSixArena } from "./rl/stageSixArena.js";
+import { StageSevenArena } from "./rl/stageSevenArena.js";
 import type { BridgeRequest } from "./rl/shared.js";
 
 export interface RlBridgeOptions {
@@ -26,6 +27,7 @@ export function startRlBridge(bot: Bot, options: RlBridgeOptions = {}): () => vo
   const stageFour = new StageFourArena(bot);
   const stageFive = new StageFiveArena(bot);
   const stageSix = new StageSixArena(bot);
+  const stageSeven = new StageSevenArena(bot);
   let client: WebSocket | null = null;
   let trainingActive = false;
 
@@ -63,7 +65,7 @@ export function startRlBridge(bot: Bot, options: RlBridgeOptions = {}): () => vo
       if (client !== socket) return;
       client = null;
       bot.clearControlStates();
-      void stageSix.restoreWorldSettings().catch((error) => {
+      void stageSeven.restoreWorldSettings().catch((error) => {
         console.error("Could not restore the RL world settings:", error);
       });
       if (trainingActive) {
@@ -243,6 +245,31 @@ export function startRlBridge(bot: Bot, options: RlBridgeOptions = {}): () => vo
           return;
         }
 
+        case "stage7.reset": {
+          if (!trainingActive) {
+            trainingActive = true;
+            options.onTrainingStart?.();
+          }
+          const state = await stageSeven.reset(request);
+          send(socket, { id: request.id, ok: true, state });
+          return;
+        }
+
+        case "stage7.step": {
+          if (!trainingActive) throw new Error("Call stage7.reset before stage7.step");
+          if (!Number.isInteger(request.action) || request.action! < 0 || request.action! > 13)
+            throw new Error("Stage-seven action must be an integer from 0 to 13");
+          const state = await stageSeven.step(request.action!);
+          send(socket, { id: request.id, ok: true, state });
+          return;
+        }
+
+        case "stage7.observe": {
+          if (!trainingActive) throw new Error("Call stage7.reset before observing");
+          send(socket, { id: request.id, ok: true, state: stageSeven.observe() });
+          return;
+        }
+
         default:
           send(socket, { id: request.id, ok: false, error: `Unknown request type: ${request.type}` });
       }
@@ -257,7 +284,7 @@ export function startRlBridge(bot: Bot, options: RlBridgeOptions = {}): () => vo
 
   return () => {
     bot.clearControlStates();
-    void stageSix.restoreWorldSettings().catch((error) => {
+    void stageSeven.restoreWorldSettings().catch((error) => {
       console.error("Could not restore the RL world settings:", error);
     });
     client?.close(1001, "Bot shutting down");

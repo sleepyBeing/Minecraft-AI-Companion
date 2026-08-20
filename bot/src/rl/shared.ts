@@ -19,11 +19,17 @@ export interface BridgeRequest {
     | "stage5.observe"
     | "stage6.reset"
     | "stage6.step"
-    | "stage6.observe";
+    | "stage6.observe"
+    | "stage7.reset"
+    | "stage7.step"
+    | "stage7.observe";
   action?: number;
   botPosition?: [number, number];
   targetPosition?: [number, number];
   npcPosition?: [number, number];
+  enemyPositions?: [[number, number], [number, number]];
+  enemyTypes?: [string, string];
+  selectedEnemy?: number;
   botYaw?: number;
   botHealth?: number;
   rebuildArena?: boolean;
