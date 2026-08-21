@@ -54,9 +54,11 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
     STRAY_PENALTY_SCALE = 0.045
 
     PRIORITY_NEUTRALIZATION_REWARD = 8.0
-    CORRECT_TARGET_SWITCH_REWARD = 0.15
+    CORRECT_TARGET_SWITCH_REWARD = 0.50
     WRONG_TARGET_SWITCH_PENALTY = 0.15
     REDUNDANT_TARGET_SELECTION_PENALTY = 0.03
+    PRIORITY_DAMAGE_REWARD_SCALE = 0.10
+    LOWER_PRIORITY_ATTACK_PENALTY = 0.20
     ENEMY_COUNT = 2
     ENEMY_NPC_MIN_DISTANCE = 2.5
     # The live arena inherits Stage Six's 2.5-to-5-block reset contract.
@@ -151,6 +153,7 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
         priority_before = self._highest_priority_enemy()
         alive_before = self.enemy_alive.copy()
         selected_before = self.selected_enemy
+        npc_threatened_before = self._npc_is_under_attack()
 
         if action in (
             int(StageSevenAction.SELECT_ENEMY_1),
@@ -171,6 +174,7 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
             priority_before=priority_before,
             alive_before=alive_before,
             selected_before=selected_before,
+            npc_threatened_before=npc_threatened_before,
         )
 
     def _finalize_stage_seven(
@@ -185,6 +189,7 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
         priority_before: int,
         alive_before: np.ndarray,
         selected_before: int,
+        npc_threatened_before: bool,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         del observation
         newly_defeated = np.flatnonzero(alive_before & ~self.enemy_alive)
@@ -208,7 +213,25 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
             priority_before=priority_before,
             alive_before=alive_before,
         )
-        reward += priority_reward + float(selection["target_selection_reward"])
+        priority_damage_reward = (
+            float(info["damage_dealt"]) * self.PRIORITY_DAMAGE_REWARD_SCALE
+            if selected_before == priority_before
+            else 0.0
+        )
+        lower_priority_attack = (
+            action == int(StageSevenAction.ATTACK)
+            and selected_before != priority_before
+            and npc_threatened_before
+        )
+        lower_priority_attack_penalty = (
+            self.LOWER_PRIORITY_ATTACK_PENALTY if lower_priority_attack else 0.0
+        )
+        reward += (
+            priority_reward
+            + float(selection["target_selection_reward"])
+            + priority_damage_reward
+            - lower_priority_attack_penalty
+        )
         npc_defeated = bool(info.get("npc_defeated", False))
         bot_defeated = bool(info.get("bot_defeated", False))
         terminated = npc_defeated or bot_defeated or all_defeated
@@ -228,6 +251,9 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
                 "neutralized_enemy": neutralized,
                 "neutralized_highest_priority": neutralized == priority_before,
                 "priority_neutralization_reward": priority_reward,
+                "priority_damage_reward": priority_damage_reward,
+                "lower_priority_attack_penalty": lower_priority_attack_penalty,
+                "attacked_lower_priority_while_npc_threatened": lower_priority_attack,
                 **selection,
                 "all_enemies_defeated": all_defeated,
                 "success": success,
@@ -505,6 +531,9 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
             "correct_target_switch": False,
             "wrong_target_switch": False,
             "redundant_target_selection": False,
+            "priority_damage_reward": 0.0,
+            "lower_priority_attack_penalty": 0.0,
+            "attacked_lower_priority_while_npc_threatened": False,
         }
 
     def _target_selection_reward(

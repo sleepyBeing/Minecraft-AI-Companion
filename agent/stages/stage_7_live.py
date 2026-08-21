@@ -26,6 +26,7 @@ class LiveStageSevenPrioritizationEnv(
         priority_before = self._highest_priority_enemy()
         alive_before = self.enemy_alive.copy()
         selected_before = self.selected_enemy
+        npc_threatened_before = self._npc_is_under_attack()
         if action < 12:
             result = LiveStageSixProtectionEnv.step(self, action)
         else:
@@ -36,6 +37,7 @@ class LiveStageSevenPrioritizationEnv(
             priority_before=priority_before,
             alive_before=alive_before,
             selected_before=selected_before,
+            npc_threatened_before=npc_threatened_before,
         )
 
     def _live_selection_step(

@@ -27,6 +27,8 @@ def evaluate_policy(
         "priority_neutralizations": 0.0,
         "wrong_priority_neutralizations": 0.0,
         "selector_actions": 0.0,
+        "priority_damage_reward": 0.0,
+        "lower_priority_threat_attacks": 0.0,
         "correct_target_steps": 0.0,
         "decisions": 0.0,
     }
@@ -51,6 +53,12 @@ def evaluate_policy(
                 and not info["neutralized_highest_priority"]
             )
             totals["selector_actions"] += float(action >= 12)
+            totals["priority_damage_reward"] += float(
+                info["priority_damage_reward"]
+            )
+            totals["lower_priority_threat_attacks"] += float(
+                info["attacked_lower_priority_while_npc_threatened"]
+            )
             totals["correct_target_steps"] += float(
                 int(info["selected_enemy"]) == int(info["highest_priority_enemy"])
             )
@@ -76,6 +84,12 @@ def evaluate_policy(
         ),
         "correct_target_fraction": totals["correct_target_steps"] / decisions,
         "selector_action_fraction": totals["selector_actions"] / decisions,
+        "mean_priority_damage_reward": (
+            totals["priority_damage_reward"] / episodes
+        ),
+        "mean_lower_priority_threat_attacks": (
+            totals["lower_priority_threat_attacks"] / episodes
+        ),
         "mean_decisions": totals["decisions"] / episodes,
     }
 

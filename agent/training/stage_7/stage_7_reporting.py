@@ -81,6 +81,15 @@ def write_rollout_summaries(*, tf: Any, summary_writer: Any,
             "prioritization/redundant_target_selections": np.sum(
                 rollout["redundant_target_selections"]
             ),
+            "prioritization/priority_damage_rewards": np.sum(
+                rollout["priority_damage_reward"]
+            ),
+            "prioritization/lower_priority_attack_penalties": np.sum(
+                rollout["lower_priority_attack_penalty"]
+            ),
+            "prioritization/lower_priority_threat_attacks": np.sum(
+                rollout["lower_priority_threat_attacks"]
+            ),
             "prioritization/enemies_attacking_npc": np.mean(
                 rollout["enemy_attacking_npc_steps"]
             ),
@@ -108,6 +117,7 @@ def print_rollout(step: int, timesteps: int, rollout: dict[str, np.ndarray],
         f"correct_switch={int(np.sum(rollout['correct_target_switches']))} "
         f"wrong_switch={int(np.sum(rollout['wrong_target_switches']))} "
         f"reselect={int(np.sum(rollout['redundant_target_selections']))} "
+        f"low_priority_attack={int(np.sum(rollout['lower_priority_threat_attacks']))} "
         f"actor_epochs={int(metrics['actor_epochs_completed'])} "
         f"kl_stop={int(metrics['actor_early_stopped'])} "
         f"policy_loss={metrics['policy_loss']:.4f} "

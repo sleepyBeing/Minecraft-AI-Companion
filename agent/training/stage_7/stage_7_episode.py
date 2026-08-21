@@ -33,6 +33,9 @@ PRIORITY_METRICS = (
     "correct_target_switches",
     "wrong_target_switches",
     "redundant_target_selections",
+    "priority_damage_reward",
+    "lower_priority_attack_penalty",
+    "lower_priority_threat_attacks",
 )
 METRIC_NAMES = (*STAGE_SIX_METRICS, *PRIORITY_METRICS)
 
@@ -64,6 +67,13 @@ def priority_transition_metrics(action: int, info: dict[str, Any]) -> dict[str, 
         "correct_target_switches": float(info["correct_target_switch"]),
         "wrong_target_switches": float(info["wrong_target_switch"]),
         "redundant_target_selections": float(info["redundant_target_selection"]),
+        "priority_damage_reward": float(info["priority_damage_reward"]),
+        "lower_priority_attack_penalty": float(
+            info["lower_priority_attack_penalty"]
+        ),
+        "lower_priority_threat_attacks": float(
+            info["attacked_lower_priority_while_npc_threatened"]
+        ),
     }
 
 
