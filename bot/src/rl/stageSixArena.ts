@@ -76,7 +76,7 @@ export class StageSixArena extends StageFiveArena {
     await this.command(
       `summon minecraft:villager ${npc.x} ${this.origin.y + 1} ${npc.z} ` +
       `{Tags:["${NPC_TAG}"],NoAI:1b,PersistenceRequired:1b,Silent:1b,` +
-      `Invulnerable:0b,Health:${NPC_MAX_HEALTH}.0f}`
+      `Invulnerable:1b,Health:${NPC_MAX_HEALTH}.0f}`
     );
     await this.command(
       `attribute @e[type=minecraft:villager,tag=${NPC_TAG},limit=1] ` +
@@ -99,6 +99,12 @@ export class StageSixArena extends StageFiveArena {
       await this.command("effect clear @s minecraft:resistance");
     }
     await this.setTargetFrozen(request.freezeTarget === true);
+    await this.command(
+      `data merge entity @e[type=minecraft:villager,tag=${NPC_TAG},limit=1] ` +
+      "{Invulnerable:0b,Health:20.0f}"
+    );
+    this.npcHealth = NPC_MAX_HEALTH;
+    this.npcHealthDirty = false;
     return this.observe();
   }
 

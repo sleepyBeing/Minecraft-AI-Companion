@@ -69,6 +69,18 @@ def write_rollout_summaries(*, tf: Any, summary_writer: Any,
             "prioritization/neutralization_rewards": np.sum(
                 rollout["priority_neutralization_reward"]
             ),
+            "prioritization/target_selection_rewards": np.sum(
+                rollout["target_selection_reward"]
+            ),
+            "prioritization/correct_target_switches": np.sum(
+                rollout["correct_target_switches"]
+            ),
+            "prioritization/wrong_target_switches": np.sum(
+                rollout["wrong_target_switches"]
+            ),
+            "prioritization/redundant_target_selections": np.sum(
+                rollout["redundant_target_selections"]
+            ),
             "prioritization/enemies_attacking_npc": np.mean(
                 rollout["enemy_attacking_npc_steps"]
             ),
@@ -93,6 +105,9 @@ def print_rollout(step: int, timesteps: int, rollout: dict[str, np.ndarray],
         f"correct_target={np.mean(rollout['priority_target_selected_steps']):.2f} "
         f"select1={int(np.sum(rollout['select_enemy_1_actions']))} "
         f"select2={int(np.sum(rollout['select_enemy_2_actions']))} "
+        f"correct_switch={int(np.sum(rollout['correct_target_switches']))} "
+        f"wrong_switch={int(np.sum(rollout['wrong_target_switches']))} "
+        f"reselect={int(np.sum(rollout['redundant_target_selections']))} "
         f"actor_epochs={int(metrics['actor_epochs_completed'])} "
         f"kl_stop={int(metrics['actor_early_stopped'])} "
         f"policy_loss={metrics['policy_loss']:.4f} "

@@ -29,6 +29,10 @@ PRIORITY_METRICS = (
     "enemy_attacking_npc_steps",
     "enemy_attacking_bot_steps",
     "all_enemies_defeated",
+    "target_selection_reward",
+    "correct_target_switches",
+    "wrong_target_switches",
+    "redundant_target_selections",
 )
 METRIC_NAMES = (*STAGE_SIX_METRICS, *PRIORITY_METRICS)
 
@@ -56,6 +60,10 @@ def priority_transition_metrics(action: int, info: dict[str, Any]) -> dict[str, 
         "enemy_attacking_npc_steps": float(np.sum(info["enemy_attacking_npc"])),
         "enemy_attacking_bot_steps": float(np.sum(info["enemy_attacking_bot"])),
         "all_enemies_defeated": float(info["all_enemies_defeated"]),
+        "target_selection_reward": float(info["target_selection_reward"]),
+        "correct_target_switches": float(info["correct_target_switch"]),
+        "wrong_target_switches": float(info["wrong_target_switch"]),
+        "redundant_target_selections": float(info["redundant_target_selection"]),
     }
 
 

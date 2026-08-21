@@ -25,6 +25,7 @@ class LiveStageSevenPrioritizationEnv(
             raise ValueError("Invalid Stage Seven action; expected 0 to 13")
         priority_before = self._highest_priority_enemy()
         alive_before = self.enemy_alive.copy()
+        selected_before = self.selected_enemy
         if action < 12:
             result = LiveStageSixProtectionEnv.step(self, action)
         else:
@@ -34,6 +35,7 @@ class LiveStageSevenPrioritizationEnv(
             action=action,
             priority_before=priority_before,
             alive_before=alive_before,
+            selected_before=selected_before,
         )
 
     def _live_selection_step(

@@ -11,6 +11,10 @@ from agent.training.stage_2.stage_2_models import build_stage_two_actor, build_s
 from agent.training.stage_2.stage_2_ppo import update_stage_two_ppo
 from agent.training.stage_7.stage_7_config import PROJECT_ROOT, parse_arguments, validate_arguments
 from agent.training.stage_7.stage_7_episode import StageSevenEpisodeCsvLogger, StageSevenEpisodeState
+from agent.training.stage_7.stage_7_evaluation import (
+    evaluate_policy,
+    write_evaluation_summaries,
+)
 from agent.training.stage_7.stage_7_models import initialize_models
 from agent.training.stage_7.stage_7_reporting import (
     print_rollout,
@@ -74,6 +78,9 @@ def main() -> None:
     next_checkpoint_step = (
         int(global_step.numpy()) // args.checkpoint_freq + 1
     ) * args.checkpoint_freq
+    next_evaluation_step = (
+        int(global_step.numpy()) // args.evaluation_freq + 1
+    ) * args.evaluation_freq
 
     print(f"Models: {model_directory}")
     print(f"Logs:   {log_directory}")
@@ -107,6 +114,26 @@ def main() -> None:
                 tf=tf, summary_writer=summary_writer,
                 metrics=metrics, rollout=rollout, step=step,
             )
+            if step >= next_evaluation_step:
+                evaluation_metrics = evaluate_policy(
+                    tf=tf,
+                    actor=actor,
+                    environment=environment,
+                    episode_count=args.evaluation_episodes,
+                    base_seed=args.seed + 1_000_000,
+                )
+                write_evaluation_summaries(
+                    tf=tf,
+                    summary_writer=summary_writer,
+                    metrics=evaluation_metrics,
+                    step=step,
+                )
+                observation, _ = environment.reset(
+                    seed=int(np.random.randint(0, 2**31 - 1))
+                )
+                episode_state.reset_episode()
+                while next_evaluation_step <= step:
+                    next_evaluation_step += args.evaluation_freq
             if step >= next_checkpoint_step:
                 saved_path = checkpoint_manager.save(checkpoint_number=step)
                 print(f"Checkpoint saved: {saved_path}")

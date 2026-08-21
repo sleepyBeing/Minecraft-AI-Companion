@@ -33,7 +33,7 @@ def parse_arguments() -> argparse.Namespace:
     actor.add_argument("--learning-rate", type=positive_float, default=3e-4)
     actor.add_argument("--clip-ratio", type=positive_float, default=0.2)
     actor.add_argument("--target-kl", type=positive_float, default=0.03)
-    actor.add_argument("--entropy-coefficient", type=float, default=0.05)
+    actor.add_argument("--entropy-coefficient", type=float, default=0.02)
     actor.add_argument("--max-gradient-norm", type=positive_float, default=0.5)
     actor.add_argument("--hidden-size", type=positive_integer, default=128)
     actor.add_argument("--new-action-bias", type=float, default=-0.5)
@@ -51,6 +51,9 @@ def parse_arguments() -> argparse.Namespace:
     returns.add_argument("--gamma", type=unit_interval, default=0.99)
     returns.add_argument("--gae-lambda", type=unit_interval, default=0.95)
     parser.add_argument("--checkpoint-freq", type=positive_integer, default=10_000)
+    evaluation = parser.add_argument_group("evaluation")
+    evaluation.add_argument("--evaluation-freq", type=positive_integer, default=20_000)
+    evaluation.add_argument("--evaluation-episodes", type=positive_integer, default=3)
 
     initialization = parser.add_mutually_exclusive_group(required=True)
     initialization.add_argument("--resume", type=Path)

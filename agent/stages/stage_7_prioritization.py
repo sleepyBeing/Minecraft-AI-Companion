@@ -54,6 +54,9 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
     STRAY_PENALTY_SCALE = 0.045
 
     PRIORITY_NEUTRALIZATION_REWARD = 8.0
+    CORRECT_TARGET_SWITCH_REWARD = 0.15
+    WRONG_TARGET_SWITCH_PENALTY = 0.15
+    REDUNDANT_TARGET_SELECTION_PENALTY = 0.03
     ENEMY_COUNT = 2
     ENEMY_NPC_MIN_DISTANCE = 2.5
     # The live arena inherits Stage Six's 2.5-to-5-block reset contract.
@@ -147,6 +150,7 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
             raise ValueError("Invalid Stage Seven action; expected 0 to 13")
         priority_before = self._highest_priority_enemy()
         alive_before = self.enemy_alive.copy()
+        selected_before = self.selected_enemy
 
         if action in (
             int(StageSevenAction.SELECT_ENEMY_1),
@@ -166,6 +170,7 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
             action=action,
             priority_before=priority_before,
             alive_before=alive_before,
+            selected_before=selected_before,
         )
 
     def _finalize_stage_seven(
@@ -179,6 +184,7 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
         action: int,
         priority_before: int,
         alive_before: np.ndarray,
+        selected_before: int,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         del observation
         newly_defeated = np.flatnonzero(alive_before & ~self.enemy_alive)
@@ -196,7 +202,13 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
             if neutralized == priority_before
             else 0.0
         )
-        reward += priority_reward
+        selection = self._target_selection_reward(
+            action=action,
+            selected_before=selected_before,
+            priority_before=priority_before,
+            alive_before=alive_before,
+        )
+        reward += priority_reward + float(selection["target_selection_reward"])
         npc_defeated = bool(info.get("npc_defeated", False))
         bot_defeated = bool(info.get("bot_defeated", False))
         terminated = npc_defeated or bot_defeated or all_defeated
@@ -216,6 +228,7 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
                 "neutralized_enemy": neutralized,
                 "neutralized_highest_priority": neutralized == priority_before,
                 "priority_neutralization_reward": priority_reward,
+                **selection,
                 "all_enemies_defeated": all_defeated,
                 "success": success,
                 "scenario": "prioritize_two_threats",
@@ -488,6 +501,47 @@ class StageSevenPrioritizationEnv(StageSixProtectionEnv):
             "neutralized_highest_priority": False,
             "priority_neutralization_reward": 0.0,
             "all_enemies_defeated": False,
+            "target_selection_reward": 0.0,
+            "correct_target_switch": False,
+            "wrong_target_switch": False,
+            "redundant_target_selection": False,
+        }
+
+    def _target_selection_reward(
+        self,
+        *,
+        action: int,
+        selected_before: int,
+        priority_before: int,
+        alive_before: np.ndarray,
+    ) -> dict[str, float | bool]:
+        if action < int(StageSevenAction.SELECT_ENEMY_1):
+            return {
+                "target_selection_reward": 0.0,
+                "correct_target_switch": False,
+                "wrong_target_switch": False,
+                "redundant_target_selection": False,
+            }
+        requested = action - int(StageSevenAction.SELECT_ENEMY_1)
+        redundant = requested == selected_before
+        correct = (
+            not redundant
+            and bool(alive_before[requested])
+            and requested == priority_before
+        )
+        wrong = not redundant and not correct
+        value = (
+            -self.REDUNDANT_TARGET_SELECTION_PENALTY
+            if redundant
+            else self.CORRECT_TARGET_SWITCH_REWARD
+            if correct
+            else -self.WRONG_TARGET_SWITCH_PENALTY
+        )
+        return {
+            "target_selection_reward": value,
+            "correct_target_switch": correct,
+            "wrong_target_switch": wrong,
+            "redundant_target_selection": redundant,
         }
 
     def render(self) -> str:

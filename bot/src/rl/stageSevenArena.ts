@@ -87,9 +87,11 @@ export class StageSevenArena extends StageSixArena {
 
     for (let index = 0; index < this.threats.length; index += 1) {
       await this.spawnThreat(index);
-      const entity = this.findThreatEntity(index);
+      const entity = await this.waitForThreatEntity(index);
       if (!entity)
-        throw new Error(`Stage-seven enemy ${index + 1} did not spawn`);
+        throw new Error(
+          `Stage-seven enemy ${index + 1} did not become visible within 2 seconds`
+        );
       this.threats[index].entityId = entity.id;
       await this.healthReaders[index].ensureObjective();
     }
@@ -211,6 +213,19 @@ export class StageSevenArena extends StageSixArena {
       `PersistenceRequired:1b,Silent:1b,CanPickUpLoot:0b,` +
       `Health:${spec.maxHealth}.0f}`
     );
+  }
+
+  private async waitForThreatEntity(
+    index: number,
+    timeoutMs = 2_000
+  ): Promise<Entity | null> {
+    const deadline = Date.now() + timeoutMs;
+    let entity = this.findThreatEntity(index);
+    while (!entity && Date.now() < deadline) {
+      await sleep(50);
+      entity = this.findThreatEntity(index);
+    }
+    return entity;
   }
 
   private async advanceThreats(duration: number): Promise<void> {
